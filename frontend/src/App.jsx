@@ -41,6 +41,27 @@ function RankingList({ entries, currentName, showPoints = true }) {
   </li>)}</ol>;
 }
 
+function QuestionFeedback({ feedback }) {
+  if (!feedback) return null;
+  const outcomeLabels = {
+    correct: 'Correct',
+    incorrect: 'Incorrect',
+    unanswered: 'Unanswered',
+    not_eligible: 'Not eligible',
+  };
+  const movement = feedback.rank_change === 'new'
+    ? 'New to the leaderboard'
+    : feedback.rank_change > 0
+      ? `Up ${feedback.rank_change} ${feedback.rank_change === 1 ? 'place' : 'places'}`
+      : feedback.rank_change < 0
+        ? `Down ${Math.abs(feedback.rank_change)} ${Math.abs(feedback.rank_change) === 1 ? 'place' : 'places'}`
+        : 'No rank change';
+  return <section className={`question-feedback feedback-${feedback.outcome}`} aria-live="polite">
+    <div className="feedback-outcome"><strong>{outcomeLabels[feedback.outcome]}</strong><span>+{feedback.points_awarded} points</span></div>
+    <div className="feedback-rank"><span>Your rank movement</span><strong>{movement}</strong></div>
+  </section>;
+}
+
 export default function App() {
   const [theme, setTheme] = useState(getInitialTheme);
   const [location, setLocation] = useLocationState();
@@ -434,7 +455,7 @@ export default function App() {
             </form>
           </> : participant && event.state === 'lobby' && <div className="lobby-card"><span className="lobby-orbit"><Radio size={26} /></span><div className="eyebrow"><span className="eyebrow-line" />YOU’RE IN<span className="eyebrow-line" /></div><h1 className="lobby-title">Stay close,<br /><span className="gradient-text">{participant.display_name}.</span></h1><p className="hero-copy">You’re in the lobby for <strong>{event.title}</strong>.<br />The host will start the game soon.</p><div className="waiting-status"><span className="pulse-dot" /> WAITING FOR THE HOST</div></div>}
           {participant && event.state === 'completed' && <div className="final-results"><div className="eyebrow"><span className="eyebrow-line" />QUIZ COMPLETE<span className="eyebrow-line" /></div><h1 className="lobby-title">The final<br /><span className="gradient-text">leaderboard.</span></h1><p className="hero-copy">You finished at rank <strong>#{event.leaderboard_self?.rank ?? '—'}</strong> with <strong>{event.leaderboard_self?.points ?? 0} points.</strong></p><section className="players-card final-ranking"><span className="section-kicker">FINAL STANDINGS</span><RankingList entries={event.leaderboard || []} currentName={participant.display_name} /></section><section className="answer-review"><span className="section-kicker">YOUR ANSWERS</span><h2>Question review</h2>{(event.answer_review || []).map((item) => <article className={`review-row outcome-${item.outcome}`} key={item.position}><div className="review-heading"><span>QUESTION {String(item.position + 1).padStart(2, '0')}</span><strong>{item.outcome.toUpperCase()}</strong></div><h3>{item.prompt}</h3><p>Your answer: <strong>{item.selected_answer ?? 'No answer'}</strong></p><p>Correct answer: <strong>{item.correct_answer}</strong></p></article>)}</section></div>}
-          {participant && event.state === 'results' && activeQuestion && <div className="participant-live-layout"><div className="participant-test result-interval"><div className="eyebrow"><span className="eyebrow-line" />QUESTION RESULTS<span className="eyebrow-line" /></div><div className="test-progress">QUESTION {String(activeQuestion.position + 1).padStart(2, '0')} <span>OF {String(event.question_count).padStart(2, '0')}</span></div><h1 className="test-question">{activeQuestion.prompt}</h1><p className="answer-locked">Standings are updated. Next question starts in {event.results_remaining_seconds} seconds.</p></div><aside className="participant-leaderboard"><span className="section-kicker">LIVE RANKING</span><h2>Your standing</h2><RankingList entries={event.leaderboard_top3 || []} currentName={participant.display_name} /><div className="your-rank"><span>Your rank</span><strong>#{event.leaderboard_self?.rank ?? '—'}</strong><span>{event.leaderboard_self?.points ?? 0} points</span></div></aside></div>}
+          {participant && event.state === 'results' && activeQuestion && <div className="participant-live-layout"><div className="participant-test result-interval"><div className="eyebrow"><span className="eyebrow-line" />QUESTION RESULTS<span className="eyebrow-line" /></div><div className="test-progress">QUESTION {String(activeQuestion.position + 1).padStart(2, '0')} <span>OF {String(event.question_count).padStart(2, '0')}</span></div><h1 className="test-question">{activeQuestion.prompt}</h1><QuestionFeedback feedback={event.question_feedback} /><p className="answer-locked">Next question starts in {event.results_remaining_seconds} seconds.</p></div><aside className="participant-leaderboard"><span className="section-kicker">LIVE RANKING</span><h2>Your standing</h2><RankingList entries={event.leaderboard_top3 || []} currentName={participant.display_name} /><div className="your-rank"><span>Your rank</span><strong>#{event.leaderboard_self?.rank ?? '—'}</strong><span>{event.leaderboard_self?.points ?? 0} points</span></div></aside></div>}
           {participant && event.state === 'active' && activeQuestion && <div className="participant-test"><div className="eyebrow"><span className="eyebrow-line" />{event.title}<span className="eyebrow-line" /></div><div className="test-progress">QUESTION {String(activeQuestion.position + 1).padStart(2, '0')} <span>OF {String(event.question_count).padStart(2, '0')}</span></div><div className={`timer-display ${remainingSeconds <= 5 ? 'timer-urgent' : ''}`} aria-live="polite"><strong>{remainingSeconds}</strong><span>SECONDS REMAINING</span></div><div className="timer-track" role="progressbar" aria-label="Question time remaining" aria-valuemin="0" aria-valuemax={activeQuestion.time_limit_seconds} aria-valuenow={Math.min(remainingSeconds, activeQuestion.time_limit_seconds)}><span style={{ width: `${Math.min(100, Math.max(0, remainingSeconds / activeQuestion.time_limit_seconds * 100))}%` }} /></div><h1 className="test-question">{activeQuestion.prompt}</h1><div className="test-choices">{activeQuestion.choices.map((choice, index) => <button key={index} className={`test-choice ${answeredChoice === index ? 'selected' : ''}`} aria-pressed={answeredChoice === index} disabled={answeredChoice != null || remainingSeconds === 0 || answerSubmitting || !event.can_answer_current_question} onClick={() => submitAnswer(index)}><span>{String.fromCharCode(65 + index)}</span>{choice}</button>)}</div>{!event.can_answer_current_question && <p className="answer-locked">You joined during this question. You can answer the next one.</p>}{answeredChoice != null && <p className="answer-locked">Answer locked in. Standings update when the question ends.</p>}{remainingSeconds === 0 && <p className="answer-locked">Time is up. Showing the standings…</p>}{error && <p className="error-message" role="alert">{error}</p>}</div>}
         </div>}
 

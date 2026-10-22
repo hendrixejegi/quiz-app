@@ -115,13 +115,21 @@ def can_answer_question(event: Event, participant: Participant, question: Questi
     return utc_datetime(participant.joined_at) <= question_started_at
 
 
-def leaderboard_payload(db: Session, event: Event) -> list[dict]:
+def leaderboard_payload(db: Session, event: Event, before_question: Question | None = None) -> list[dict]:
     participants = db.scalars(select(Participant).where(Participant.event_id == event.id)).all()
-    answers = db.execute(
+    answer_query = (
         select(ParticipantAnswer.participant_id, ParticipantAnswer.question_id, ParticipantAnswer.choice_index)
         .join(Question, Question.id == ParticipantAnswer.question_id)
         .where(Question.event_id == event.id)
-    ).all()
+    )
+    if before_question is not None:
+        question_started_at = (
+            utc_datetime(event.timer_deadline)
+            - timedelta(seconds=RESULTS_INTERVAL_SECONDS + before_question.time_limit_seconds)
+        )
+        participants = [p for p in participants if utc_datetime(p.joined_at) <= question_started_at]
+        answer_query = answer_query.where(Question.position < before_question.position)
+    answers = db.execute(answer_query).all()
     questions = {question.id: question for question in event.questions}
     totals = {participant.id: 0 for participant in participants}
     for participant_id, question_id, choice_index in answers:
@@ -138,6 +146,36 @@ def leaderboard_payload(db: Session, event: Event) -> list[dict]:
             previous_points = points
         ranking.append({"rank": rank, "display_name": participant.display_name, "points": points})
     return ranking
+
+
+def question_results_feedback(
+    db: Session,
+    event: Event,
+    participant: Participant,
+    question: Question,
+    answer: ParticipantAnswer | None,
+    current_rank: int,
+) -> dict:
+    eligible = can_answer_question(event, participant, question)
+    if not eligible:
+        outcome = "not_eligible"
+        points_awarded = 0
+        rank_before = None
+        rank_change: int | str = "new"
+    else:
+        correct = answer is not None and answer.choice_index == question.correct_choice_index
+        outcome = "correct" if correct else "incorrect" if answer is not None else "unanswered"
+        points_awarded = POINTS_PER_CORRECT_ANSWER if correct else 0
+        previous_ranking = leaderboard_payload(db, event, before_question=question)
+        previous_entry = next((row for row in previous_ranking if row["display_name"] == participant.display_name), None)
+        rank_before = previous_entry["rank"] if previous_entry else None
+        rank_change = "new" if rank_before is None else rank_before - current_rank
+    return {
+        "outcome": outcome,
+        "points_awarded": points_awarded,
+        "rank_before": rank_before,
+        "rank_change": rank_change,
+    }
 
 
 def participant_review(db: Session, event: Event, participant: Participant) -> list[dict]:
@@ -368,6 +406,10 @@ def get_participant_event_state(
         })
     if event.state == "results":
         result["results_remaining_seconds"] = max(0, int((utc_datetime(event.timer_deadline) - now).total_seconds() + 0.999))
+        own_entry = next(row for row in ranking if row["display_name"] == participant.display_name)
+        result["question_feedback"] = question_results_feedback(
+            db, event, participant, question, answer, own_entry["rank"]
+        )
     elif event.state == "completed":
         result["question_count"] = len(event.questions)
         result["leaderboard"] = ranking
