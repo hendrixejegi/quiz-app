@@ -71,6 +71,6 @@ Treat host links and participant reconnect tokens as bearer secrets. Keep `.env`
 
 The lobby broadcaster is in memory, so run one API worker per instance. Multi-worker deployments need shared pub/sub before they can reliably deliver lobby updates.
 
-The frontend demo quiz has automated checks for the 30-question bank, category shuffling, and correct-answer association. Add backend coverage for quiz validation, display-name conflicts, host authorization, and the complete timed game flow as those milestones are implemented.
+The frontend demo quiz has automated checks for its question banks, category shuffling, and correct-answer association. Add backend coverage for quiz validation, display-name conflicts, host authorization, and the complete timed game flow as those milestones are implemented.
 
 Run the backend leaderboard and timer tests from `backend/` with `python -m unittest discover -s tests -v`. They cover fixed scoring, tied ranks, final answer review, and automatic movement through the results intervals.

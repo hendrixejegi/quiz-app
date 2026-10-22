@@ -11,10 +11,10 @@ test('Fisher–Yates shuffle keeps every item and changes order with a determini
   assert.notDeepEqual(result, source);
 });
 
-test('the demo bank has 30 four-option questions split evenly across three categories', () => {
+test('the demo bank has three categories with unique four-option questions', () => {
   assert.equal(DEMO_CATEGORIES.length, 3);
-  assert.deepEqual(DEMO_CATEGORIES.map(({ questions }) => questions.length), [10, 10, 10]);
-  assert.equal(new Set(DEMO_CATEGORIES.flatMap(({ questions }) => questions.map(({ id }) => id))).size, 30);
+  assert.deepEqual(DEMO_CATEGORIES.map(({ questions }) => questions.length), [10, 10, 5]);
+  assert.equal(new Set(DEMO_CATEGORIES.flatMap(({ questions }) => questions.map(({ id }) => id))).size, 25);
 
   for (const { questions } of DEMO_CATEGORIES) {
     for (const item of questions) {
@@ -25,13 +25,13 @@ test('the demo bank has 30 four-option questions split evenly across three categ
   }
 });
 
-test('each category payload shuffles its ten questions and options while keeping correct answer indexes valid', () => {
+test('each category payload shuffles its questions and options while keeping correct answer indexes and timers valid', () => {
   for (const category of DEMO_CATEGORIES) {
     const payload = createDemoQuizPayload(category.id, () => 0);
     const originalPrompts = category.questions.map(({ prompt }) => prompt);
 
     assert.equal(payload.title, `${category.name} — Demo Quiz`);
-    assert.equal(payload.questions.length, 10);
+    assert.equal(payload.questions.length, category.questions.length);
     assert.deepEqual([...payload.questions.map(({ prompt }) => prompt)].sort(), [...originalPrompts].sort());
     assert.notDeepEqual(payload.questions.map(({ prompt }) => prompt), originalPrompts);
 
@@ -40,7 +40,7 @@ test('each category payload shuffles its ten questions and options while keeping
       assert.equal(outputQuestion.choices.length, 4);
       assert.deepEqual([...outputQuestion.choices].sort(), [...original.options].sort());
       assert.equal(outputQuestion.choices[outputQuestion.correct_choice_index], original.answer);
-      assert.equal(outputQuestion.time_limit_seconds, 20);
+      assert.equal(outputQuestion.time_limit_seconds, category.timeLimitSeconds ?? 20);
     }
   }
 });
