@@ -12,7 +12,8 @@ This iteration uses SQLite by default for quick local setup and accepts a Postgr
 
 ```text
 frontend/                 Vite + React client
-  src/App.jsx             Quiz creation, join, and lobby views
+  src/App.jsx             Quiz creation, join, lobby, and demo host onboarding
+  src/demoQuiz.js         Local demo question banks, shuffling, and API payloads
   src/styles.css          Design tokens, responsive layout, and motion
 backend/                  FastAPI service
   app/main.py             API routes and application setup
@@ -49,6 +50,8 @@ npm run dev
 
 Open the Vite URL (usually `http://localhost:5173`). Set `VITE_API_URL` in `frontend/.env` if the API uses another address. Create a quiz, open its host link in one browser tab, and visit the participant link in another. `npm run build` creates a static production build in `frontend/dist/`.
 
+Run the frontend demo quiz logic checks from `frontend/` with `npm test` (Node's built-in test runner).
+
 ## API outline
 
 - `GET /api/health` — liveness check.
@@ -67,5 +70,7 @@ Correct answers earn 100 points; incorrect and unanswered questions earn zero. T
 Treat host links and participant reconnect tokens as bearer secrets. Keep `.env` files out of version control. The host URL keeps its credential in the URL fragment so browsers do not send it as part of the HTTP request; the frontend uses it only in the authorization header. Database tables are currently created automatically at API startup; add versioned migrations before evolving a deployed database.
 
 The lobby broadcaster is in memory, so run one API worker per instance. Multi-worker deployments need shared pub/sub before they can reliably deliver lobby updates.
+
+The frontend demo quiz has automated checks for the 30-question bank, category shuffling, and correct-answer association. Add backend coverage for quiz validation, display-name conflicts, host authorization, and the complete timed game flow as those milestones are implemented.
 
 Run the backend leaderboard and timer tests from `backend/` with `python -m unittest discover -s tests -v`. They cover fixed scoring, tied ranks, final answer review, and automatic movement through the results intervals.
