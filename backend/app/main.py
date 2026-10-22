@@ -16,6 +16,9 @@ from .database import Base, SessionLocal, engine, get_db
 from .models import Choice, Event, Participant, ParticipantAnswer, Question
 from .schemas import AnswerSubmit, ParticipantJoin, QuizCreate
 
+POINTS_PER_CORRECT_ANSWER = 100
+RESULTS_INTERVAL_SECONDS = 5
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -107,22 +110,113 @@ def question_payload(question: Question) -> dict:
     }
 
 
+def can_answer_question(event: Event, participant: Participant, question: Question) -> bool:
+    question_started_at = utc_datetime(event.timer_deadline) - timedelta(seconds=question.time_limit_seconds)
+    return utc_datetime(participant.joined_at) <= question_started_at
+
+
+def leaderboard_payload(db: Session, event: Event, before_question: Question | None = None) -> list[dict]:
+    participants = db.scalars(select(Participant).where(Participant.event_id == event.id)).all()
+    answer_query = (
+        select(ParticipantAnswer.participant_id, ParticipantAnswer.question_id, ParticipantAnswer.choice_index)
+        .join(Question, Question.id == ParticipantAnswer.question_id)
+        .where(Question.event_id == event.id)
+    )
+    if before_question is not None:
+        question_started_at = (
+            utc_datetime(event.timer_deadline)
+            - timedelta(seconds=RESULTS_INTERVAL_SECONDS + before_question.time_limit_seconds)
+        )
+        participants = [p for p in participants if utc_datetime(p.joined_at) <= question_started_at]
+        answer_query = answer_query.where(Question.position < before_question.position)
+    answers = db.execute(answer_query).all()
+    questions = {question.id: question for question in event.questions}
+    totals = {participant.id: 0 for participant in participants}
+    for participant_id, question_id, choice_index in answers:
+        if questions[question_id].correct_choice_index == choice_index:
+            totals[participant_id] += POINTS_PER_CORRECT_ANSWER
+    participants.sort(key=lambda participant: (-totals[participant.id], participant.joined_at, participant.id))
+    ranking = []
+    previous_points = None
+    rank = 0
+    for index, participant in enumerate(participants, start=1):
+        points = totals[participant.id]
+        if points != previous_points:
+            rank = index
+            previous_points = points
+        ranking.append({"rank": rank, "display_name": participant.display_name, "points": points})
+    return ranking
+
+
+def question_results_feedback(
+    db: Session,
+    event: Event,
+    participant: Participant,
+    question: Question,
+    answer: ParticipantAnswer | None,
+    current_rank: int,
+) -> dict:
+    eligible = can_answer_question(event, participant, question)
+    if not eligible:
+        outcome = "not_eligible"
+        points_awarded = 0
+        rank_before = None
+        rank_change: int | str = "new"
+    else:
+        correct = answer is not None and answer.choice_index == question.correct_choice_index
+        outcome = "correct" if correct else "incorrect" if answer is not None else "unanswered"
+        points_awarded = POINTS_PER_CORRECT_ANSWER if correct else 0
+        previous_ranking = leaderboard_payload(db, event, before_question=question)
+        previous_entry = next((row for row in previous_ranking if row["display_name"] == participant.display_name), None)
+        rank_before = previous_entry["rank"] if previous_entry else None
+        rank_change = "new" if rank_before is None else rank_before - current_rank
+    return {
+        "outcome": outcome,
+        "points_awarded": points_awarded,
+        "rank_before": rank_before,
+        "rank_change": rank_change,
+    }
+
+
+def participant_review(db: Session, event: Event, participant: Participant) -> list[dict]:
+    answers = {answer.question_id: answer.choice_index for answer in db.scalars(
+        select(ParticipantAnswer).where(ParticipantAnswer.participant_id == participant.id)
+    ).all()}
+    review = []
+    for question in event.questions:
+        choice_index = answers.get(question.id)
+        correct = choice_index == question.correct_choice_index
+        review.append({
+            "position": question.position,
+            "prompt": question.prompt,
+            "selected_answer": question.choices[choice_index].text if choice_index is not None else None,
+            "correct_answer": question.choices[question.correct_choice_index].text,
+            "outcome": "correct" if correct else "incorrect" if choice_index is not None else "unanswered",
+        })
+    return review
+
+
 def advance_expired_event(db: Session, event: Event, now: datetime | None = None) -> bool:
-    if event.state != "active" or event.timer_deadline is None:
+    if event.state not in {"active", "results"} or event.timer_deadline is None:
         return False
     now = now or datetime.now(timezone.utc)
     changed = False
-    while event.state == "active" and event.timer_deadline is not None and utc_datetime(event.timer_deadline) <= now:
+    while event.state in {"active", "results"} and event.timer_deadline is not None and utc_datetime(event.timer_deadline) <= now:
         expired_deadline = utc_datetime(event.timer_deadline)
-        next_position = (event.current_question_position or 0) + 1
         changed = True
-        if next_position >= len(event.questions):
-            event.state = "completed"
-            event.current_question_position = None
-            event.timer_deadline = None
+        if event.state == "active":
+            event.state = "results"
+            event.timer_deadline = expired_deadline + timedelta(seconds=RESULTS_INTERVAL_SECONDS)
         else:
-            event.current_question_position = next_position
-            event.timer_deadline = expired_deadline + timedelta(seconds=event.questions[next_position].time_limit_seconds)
+            next_position = (event.current_question_position or 0) + 1
+            if next_position >= len(event.questions):
+                event.state = "completed"
+                event.current_question_position = None
+                event.timer_deadline = None
+            else:
+                event.state = "active"
+                event.current_question_position = next_position
+                event.timer_deadline = expired_deadline + timedelta(seconds=event.questions[next_position].time_limit_seconds)
     if changed:
         db.commit()
     return changed
@@ -131,9 +225,10 @@ def advance_expired_event(db: Session, event: Event, now: datetime | None = None
 async def timer_worker():
     while True:
         with SessionLocal() as db:
-            events = db.scalars(select(Event).where(Event.state == "active")).all()
+            events = db.scalars(select(Event).where(Event.state.in_(["active", "results"]))).all()
             for event in events:
-                advance_expired_event(db, event)
+                if advance_expired_event(db, event):
+                    await host_connections.publish(event.id, {"type": "host_lobby", "data": host_lobby_payload(db, event)})
         await asyncio.sleep(0.2)
 
 
@@ -165,6 +260,10 @@ def host_lobby_payload(db: Session, event: Event) -> dict:
             {"name": participant.private_name, "display_name": participant.display_name}
             for participant in participants
         ],
+        "question_count": len(event.questions),
+        "current_question_position": event.current_question_position,
+        "deadline_at": utc_datetime(event.timer_deadline).isoformat() if event.timer_deadline else None,
+        "leaderboard": leaderboard_payload(db, event),
     }
 
 
@@ -225,7 +324,7 @@ def join_event(
     db: Session = Depends(get_db),
 ):
     event = lookup_event(db, join_code)
-    if event.state not in {"lobby", "active"}:
+    if event.state not in {"lobby", "active", "results"}:
         raise HTTPException(status_code=409, detail="This quiz is no longer accepting participants")
     count = db.scalar(select(func.count()).select_from(Participant).where(Participant.event_id == event.id)) or 0
     if count >= 50:
@@ -281,7 +380,15 @@ def get_participant_event_state(
         "state": event.state,
         "participant_display_name": participant.display_name,
     }
-    if event.state == "active" and event.current_question_position is not None:
+    ranking = None
+    if event.state in {"results", "completed"}:
+        ranking = leaderboard_payload(db, event)
+        own_entry = next((row for row in ranking if row["display_name"] == participant.display_name), None)
+        result.update({
+            "leaderboard_top3": ranking[:3],
+            "leaderboard_self": own_entry,
+        })
+    if event.state in {"active", "results"} and event.current_question_position is not None:
         question = event.questions[event.current_question_position]
         answer = db.scalar(select(ParticipantAnswer).where(
             ParticipantAnswer.participant_id == participant.id,
@@ -295,9 +402,18 @@ def get_participant_event_state(
             "deadline_at": utc_datetime(event.timer_deadline).isoformat(),
             "server_time": now.isoformat(),
             "answer_choice_index": answer.choice_index if answer else None,
+            "can_answer_current_question": can_answer_question(event, participant, question),
         })
+    if event.state == "results":
+        result["results_remaining_seconds"] = max(0, int((utc_datetime(event.timer_deadline) - now).total_seconds() + 0.999))
+        own_entry = next(row for row in ranking if row["display_name"] == participant.display_name)
+        result["question_feedback"] = question_results_feedback(
+            db, event, participant, question, answer, own_entry["rank"]
+        )
     elif event.state == "completed":
         result["question_count"] = len(event.questions)
+        result["leaderboard"] = ranking
+        result["answer_review"] = participant_review(db, event, participant)
     return result
 
 
@@ -305,6 +421,7 @@ def get_participant_event_state(
 def submit_participant_answer(
     join_code: str,
     payload: AnswerSubmit,
+    background_tasks: BackgroundTasks,
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
@@ -314,6 +431,8 @@ def submit_participant_answer(
     if event.state != "active" or event.current_question_position is None:
         raise HTTPException(status_code=409, detail="There is no active question")
     question = event.questions[event.current_question_position]
+    if not can_answer_question(event, participant, question):
+        raise HTTPException(status_code=409, detail="You joined during this question and can answer the next one")
     if payload.choice_index >= len(question.choices):
         raise HTTPException(status_code=422, detail="Choose one of the available answers")
     if utc_datetime(event.timer_deadline) <= datetime.now(timezone.utc):
@@ -337,6 +456,11 @@ def submit_participant_answer(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Your answer is already locked") from None
+    background_tasks.add_task(
+        host_connections.publish,
+        event.id,
+        {"type": "host_lobby", "data": host_lobby_payload(db, event)},
+    )
     return {"state": "accepted", "choice_index": answer.choice_index}
 
 
@@ -374,7 +498,7 @@ async def host_lobby_updates(websocket: WebSocket, event_id: str):
 
 
 @app.post("/api/host/{event_id}/start")
-def start_host_event(event_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
+def start_host_event(event_id: str, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Host link required")
     token = authorization.removeprefix("Bearer ").strip()
@@ -388,4 +512,9 @@ def start_host_event(event_id: str, authorization: str | None = Header(default=N
     event.current_question_position = 0
     event.timer_deadline = datetime.now(timezone.utc) + timedelta(seconds=event.questions[0].time_limit_seconds)
     db.commit()
+    background_tasks.add_task(
+        host_connections.publish,
+        event.id,
+        {"type": "host_lobby", "data": host_lobby_payload(db, event)},
+    )
     return {"state": event.state}

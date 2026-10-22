@@ -4,9 +4,9 @@ A live quiz MVP with a React host/participant interface and a FastAPI backend. P
 
 ## First iteration
 
-The initial slice supports quiz creation (1–20 questions, 2–4 answers, 5–300 second timer setting), separate participant and private host links, joining a lobby with a unique display name, and a host view of joined participants. The browser never receives correct answers through participant endpoints. Host and reconnect secrets are stored as hashes and issued only when needed.
+The app supports quiz creation (1–20 questions, 2–4 answers, 5–300 second timer setting), separate participant and private host links, and joining with a unique display name. During a live quiz, correct answers award 100 points and the host sees the full live leaderboard. During each five-second results interval, participants see the top three, their rank movement, whether their answer was correct, and points earned. After the final interval, they see final standings and a review of their own answers against the correct answers. Correct answers are not sent to participant endpoints before completion. Host and reconnect secrets are stored as hashes and issued only when needed.
 
-This iteration uses SQLite by default for quick local setup and accepts a PostgreSQL `DATABASE_URL`. The host lobby receives participant updates over an authenticated WebSocket. Timed question progression and results broadcasts, durable reconnect, migrations, BetterAuth admin, rate limiting, and deployment are future milestones from `PLAN.md`; this is not yet production ready.
+This iteration uses SQLite by default for quick local setup and accepts a PostgreSQL `DATABASE_URL`. Host state and live standings arrive over an authenticated WebSocket; participants resync state once per second. The API calculates standings from stored answers, so there is no score migration. Durable reconnect, migrations, BetterAuth admin, rate limiting, and deployment remain future milestones from `PLAN.md`; this is not yet production ready.
 
 ## Repository layout
 
@@ -55,8 +55,12 @@ Open the Vite URL (usually `http://localhost:5173`). Set `VITE_API_URL` in `fron
 - `POST /api/quizzes` — validate and create a quiz; returns the public join URL and one-time private host URL.
 - `GET /api/events/{join_code}` — return public lobby metadata.
 - `POST /api/events/{join_code}/participants` — join a lobby; returns a one-time reconnect token.
+- `GET /api/events/{join_code}/state` — return participant state; completed quizzes include full standings and an answer review.
+- `POST /api/events/{join_code}/answers` — submit one answer for the current question before its deadline.
 - `GET /api/host/{event_id}` — return host-only lobby details; requires `Authorization: Bearer <token>`.
-- `WS /api/host/{event_id}/ws` — send the host token as the first text frame; receive the current lobby and updates when participants join.
+- `WS /api/host/{event_id}/ws` — send the host token as the first text frame; receive current state and live standings updates.
+
+Correct answers earn 100 points; incorrect and unanswered questions earn zero. Tied scores share rank, with tied rows ordered by join time. Each question is followed by a five-second results interval. Participants who join during a question can begin answering with the next question.
 
 ## Security and development notes
 
@@ -64,4 +68,4 @@ Treat host links and participant reconnect tokens as bearer secrets. Keep `.env`
 
 The lobby broadcaster is in memory, so run one API worker per instance. Multi-worker deployments need shared pub/sub before they can reliably deliver lobby updates.
 
-No automated test suite or linter is configured in this first iteration. Add coverage for quiz validation, display-name conflicts, host authorization, and the complete timed game flow as those milestones are implemented.
+Run the backend leaderboard and timer tests from `backend/` with `python -m unittest discover -s tests -v`. They cover fixed scoring, tied ranks, final answer review, and automatic movement through the results intervals.
