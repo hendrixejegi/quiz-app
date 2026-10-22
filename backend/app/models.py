@@ -69,7 +69,15 @@ class Participant(Base):
 
 class ParticipantAnswer(Base):
     __tablename__ = "participant_answers"
-    __table_args__ = (UniqueConstraint("participant_id", "question_id", name="uq_participant_question_answer"),)
+    # PostgreSQL backs a named unique constraint with a schema-wide index.
+    # Keep the index name table-specific to avoid collisions with older schemas.
+    __table_args__ = (
+        UniqueConstraint(
+            "participant_id",
+            "question_id",
+            name="uq_participant_answers_participant_question",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     participant_id: Mapped[str] = mapped_column(ForeignKey("participants.id", ondelete="CASCADE"), nullable=False)
