@@ -46,7 +46,6 @@ export default function App() {
   const [hostInfo, setHostInfo] = useState(null);
   const [hostConnection, setHostConnection] = useState('connecting');
   const [participant, setParticipant] = useState(null);
-  const [participantStarted, setParticipantStarted] = useState(false);
   const [clockTick, setClockTick] = useState(Date.now());
   const [optimisticAnswer, setOptimisticAnswer] = useState(null);
   const [answerSubmitting, setAnswerSubmitting] = useState(false);
@@ -188,7 +187,6 @@ export default function App() {
       if (!alive) return;
       setEvent(data);
       setParticipant({ reconnect_token: reconnectToken, display_name: data.participant_display_name });
-      setParticipantStarted(data.state === 'active');
     }).catch(() => {
       if (alive) sessionStorage.removeItem(`quiz:${joinCode}:reconnect`);
     });
@@ -247,7 +245,6 @@ export default function App() {
       sessionStorage.setItem(`quiz:${joinCode}:reconnect`, result.reconnect_token);
       sessionStorage.setItem(`quiz:${joinCode}:progress`, JSON.stringify({ questionIndex: 0, answers: {} }));
       setParticipant(result);
-      setParticipantStarted(false);
       setOptimisticAnswer(null);
     } catch (reason) {
       setError(reason.message);
@@ -430,9 +427,8 @@ export default function App() {
               <button className="primary-button full-button" disabled={busy}>{busy ? 'Joining…' : <>{event.state === 'active' ? 'Join the test' : 'Join the lobby'} <ArrowRight size={17} /></>}</button>
             </form>
           </> : participant && event.state === 'lobby' && <div className="lobby-card"><span className="lobby-orbit"><Radio size={26} /></span><div className="eyebrow"><span className="eyebrow-line" />YOU’RE IN<span className="eyebrow-line" /></div><h1 className="lobby-title">Stay close,<br /><span className="gradient-text">{participant.display_name}.</span></h1><p className="hero-copy">You’re in the lobby for <strong>{event.title}</strong>.<br />The host will start the game soon.</p><div className="waiting-status"><span className="pulse-dot" /> WAITING FOR THE HOST</div></div>}
-          {participant && event.state === 'active' && !participantStarted && <div className="lobby-card"><span className="lobby-orbit"><Check size={26} /></span><div className="eyebrow"><span className="eyebrow-line" />THE QUIZ IS READY<span className="eyebrow-line" /></div><h1 className="lobby-title">You’re up,<br /><span className="gradient-text">{participant.display_name}.</span></h1><p className="hero-copy">{event.title} is ready. The room timer is already running.</p><button className="primary-button participant-start-button" onClick={() => setParticipantStarted(true)}>Start the test <ArrowRight size={17} /></button></div>}
           {participant && event.state === 'completed' && <div className="lobby-card"><span className="eyebrow"><span className="eyebrow-line" />TEST COMPLETE<span className="eyebrow-line" /></span><h1 className="lobby-title">Nice work,<br /><span className="gradient-text">{participant.display_name}.</span></h1><p className="hero-copy">You’ve completed the test.</p></div>}
-          {participant && participantStarted && event.state === 'active' && activeQuestion && <div className="participant-test"><div className="eyebrow"><span className="eyebrow-line" />{event.title}<span className="eyebrow-line" /></div><div className="test-progress">QUESTION {String(activeQuestion.position + 1).padStart(2, '0')} <span>OF {String(event.question_count).padStart(2, '0')}</span></div><div className={`timer-display ${remainingSeconds <= 5 ? 'timer-urgent' : ''}`} aria-live="polite"><strong>{remainingSeconds}</strong><span>SECONDS REMAINING</span></div><div className="timer-track" role="progressbar" aria-label="Question time remaining" aria-valuemin="0" aria-valuemax={activeQuestion.time_limit_seconds} aria-valuenow={Math.min(remainingSeconds, activeQuestion.time_limit_seconds)}><span style={{ width: `${Math.min(100, Math.max(0, remainingSeconds / activeQuestion.time_limit_seconds * 100))}%` }} /></div><h1 className="test-question">{activeQuestion.prompt}</h1><div className="test-choices">{activeQuestion.choices.map((choice, index) => <button key={index} className={`test-choice ${answeredChoice === index ? 'selected' : ''}`} aria-pressed={answeredChoice === index} disabled={answeredChoice != null || remainingSeconds === 0 || answerSubmitting} onClick={() => submitAnswer(index)}><span>{String.fromCharCode(65 + index)}</span>{choice}</button>)}</div>{answeredChoice != null && <p className="answer-locked">Answer locked in. The next question will appear when the timer ends.</p>}{remainingSeconds === 0 && <p className="answer-locked">Time is up. Moving to the next question…</p>}{error && <p className="error-message" role="alert">{error}</p>}</div>}
+          {participant && event.state === 'active' && activeQuestion && <div className="participant-test"><div className="eyebrow"><span className="eyebrow-line" />{event.title}<span className="eyebrow-line" /></div><div className="test-progress">QUESTION {String(activeQuestion.position + 1).padStart(2, '0')} <span>OF {String(event.question_count).padStart(2, '0')}</span></div><div className={`timer-display ${remainingSeconds <= 5 ? 'timer-urgent' : ''}`} aria-live="polite"><strong>{remainingSeconds}</strong><span>SECONDS REMAINING</span></div><div className="timer-track" role="progressbar" aria-label="Question time remaining" aria-valuemin="0" aria-valuemax={activeQuestion.time_limit_seconds} aria-valuenow={Math.min(remainingSeconds, activeQuestion.time_limit_seconds)}><span style={{ width: `${Math.min(100, Math.max(0, remainingSeconds / activeQuestion.time_limit_seconds * 100))}%` }} /></div><h1 className="test-question">{activeQuestion.prompt}</h1><div className="test-choices">{activeQuestion.choices.map((choice, index) => <button key={index} className={`test-choice ${answeredChoice === index ? 'selected' : ''}`} aria-pressed={answeredChoice === index} disabled={answeredChoice != null || remainingSeconds === 0 || answerSubmitting} onClick={() => submitAnswer(index)}><span>{String.fromCharCode(65 + index)}</span>{choice}</button>)}</div>{answeredChoice != null && <p className="answer-locked">Answer locked in. The next question will appear when the timer ends.</p>}{remainingSeconds === 0 && <p className="answer-locked">Time is up. Moving to the next question…</p>}{error && <p className="error-message" role="alert">{error}</p>}</div>}
         </div>}
 
         {view === 'host' && <div className="host-wrap">
