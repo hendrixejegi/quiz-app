@@ -342,12 +342,14 @@ def get_participant_event_state(
         "state": event.state,
         "participant_display_name": participant.display_name,
     }
-    ranking = leaderboard_payload(db, event)
-    own_entry = next((row for row in ranking if row["display_name"] == participant.display_name), None)
-    result.update({
-        "leaderboard_top3": ranking[:3],
-        "leaderboard_self": own_entry,
-    })
+    ranking = None
+    if event.state in {"results", "completed"}:
+        ranking = leaderboard_payload(db, event)
+        own_entry = next((row for row in ranking if row["display_name"] == participant.display_name), None)
+        result.update({
+            "leaderboard_top3": ranking[:3],
+            "leaderboard_self": own_entry,
+        })
     if event.state in {"active", "results"} and event.current_question_position is not None:
         question = event.questions[event.current_question_position]
         answer = db.scalar(select(ParticipantAnswer).where(

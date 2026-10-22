@@ -16,7 +16,7 @@ Build and deploy a demo-ready web application where a host creates and runs a ti
 - Questions advance automatically when their timers expire. Correct answers score a fixed number of points; unanswered questions score zero.
 - Correct answers award 100 fixed points; incorrect and unanswered questions award zero. Equal scores share a rank, with tied entries displayed in join order.
 - After each question, everyone sees the updated leaderboard during a five-second results interval before the next question starts. Correct answers are revealed after the final question. Final results remain available until the host closes the event.
-- During play, hosts see the full live ranking and participants see the top three plus their own rank beside the question. At completion, participants see the full ranking and a per-question review of their answer and the correct answer.
+- During play, hosts see the full live ranking. Participants see the top three and their own rank during each five-second results interval, and see the full ranking plus a per-question review after the quiz.
 - Participants can reconnect to their existing entry using a session-scoped reconnect token; submitted answers are preserved.
 - A protected super-admin portal allows pre-provisioned admins to find and delete quizzes/events. Event deletion also removes associated participant records, answers, and results.
 - Include rate limits and input/room caps, basic structured logging, setup documentation, a deployed demo, core UI/API, a minimal schema, a test strategy, and a short architecture/demo script.
