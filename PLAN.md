@@ -14,7 +14,9 @@ Build and deploy a demo-ready web application where a host creates and runs a ti
 - Participants enter a name and a unique display name for the session, then wait in a lobby until the host starts.
 - Participants may join between questions. They score only on questions they have an opportunity to answer.
 - Questions advance automatically when their timers expire. Correct answers score a fixed number of points; unanswered questions score zero.
-- After each question, everyone sees the updated leaderboard during a short results interval. Correct answers are revealed after the final question. Final results remain available until the host closes the event.
+- Correct answers award 100 fixed points; incorrect and unanswered questions award zero. Equal scores share a rank, with tied entries displayed in join order.
+- After each question, everyone sees the updated leaderboard during a five-second results interval before the next question starts. Correct answers are revealed after the final question. Final results remain available until the host closes the event.
+- During play, hosts see the full live ranking and participants see the top three plus their own rank beside the question. At completion, participants see the full ranking and a per-question review of their answer and the correct answer.
 - Participants can reconnect to their existing entry using a session-scoped reconnect token; submitted answers are preserved.
 - A protected super-admin portal allows pre-provisioned admins to find and delete quizzes/events. Event deletion also removes associated participant records, answers, and results.
 - Include rate limits and input/room caps, basic structured logging, setup documentation, a deployed demo, core UI/API, a minimal schema, a test strategy, and a short architecture/demo script.
@@ -30,7 +32,7 @@ Build and deploy a demo-ready web application where a host creates and runs a ti
 2. **Join and wait:** Participant opens the join URL, enters the required name and unique display name, and enters the waiting room. Duplicate display names are rejected with a prompt to choose another.
 3. **Play:** Host starts the event. The current question and server-authoritative timer are broadcast. Participants submit one answer before time expires. The server records answers, closes the question at timeout, updates scores, and broadcasts standings.
 4. **Late join and reconnect:** A new participant may join between questions and starts scoring from the next question. A disconnected participant reconnects with their token and resumes the same entry and current room state.
-5. **Finish:** After the final question, the app reveals correct answers and final standings. The host may close the event.
+5. **Finish:** After the final question's results interval, the app reveals the full standings and each participant's per-question outcome and correct answer. The host may close the event.
 6. **Moderate:** An authenticated super-admin searches or lists events, reviews enough identifying metadata to locate one, and deletes the selected event.
 
 ## Architecture and boundaries
@@ -51,7 +53,7 @@ Build and deploy a demo-ready web application where a host creates and runs a ti
 - **Answer:** Participant ID, question ID, selected choice, submission time, correctness, points.
 - **Admin identity:** Managed by BetterAuth; admin authorization must be verified by FastAPI.
 
-The server is authoritative for deadlines, accepted answers, session transitions, and scores. Store host and reconnect secrets as hashes where practical; only show raw secrets when issuing their links. Never place the host credential in participant-facing responses, logs, or analytics.
+The server is authoritative for deadlines, accepted answers, session transitions, and scores. Scores are calculated from recorded answers, so no derived score migration is needed. Correct answers are excluded from participant responses until the event is complete. Store host and reconnect secrets as hashes where practical; only show raw secrets when issuing their links. Never place the host credential in participant-facing responses, logs, or analytics.
 
 ## Implementation sequence
 
@@ -78,7 +80,7 @@ The server is authoritative for deadlines, accepted answers, session transitions
 
 - The 20-question and four-choice caps are defaults; each correct answer has equal fixed points.
 - Names and display names are both required. The private name is visible to the host; the leaderboard shows only the display name.
-- The leaderboard results interval duration, timer min/max, and rate-limit thresholds still need concrete values during implementation.
+- Timer min/max and rate-limit thresholds still need concrete values during implementation.
 - Data remains until host/admin deletion. A public deployment needs a clear privacy notice and a policy for participant names.
 - A private host link is a bearer secret: anyone who obtains it can control that event. There is no account-based recovery if the host loses it.
 - Anonymous public quiz creation can attract abuse. Rate limiting, validation, and the 50-person cap reduce risk but do not replace monitoring or stronger protections for a larger launch.
