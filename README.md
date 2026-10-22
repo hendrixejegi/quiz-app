@@ -12,7 +12,8 @@ This iteration uses SQLite by default for quick local setup and accepts a Postgr
 
 ```text
 frontend/                 Vite + React client
-  src/App.jsx             Quiz creation, join, and lobby views
+  src/App.jsx             Quiz creation, join, lobby, and demo host onboarding
+  src/demoQuiz.js         Local demo question banks, shuffling, and API payloads
   src/styles.css          Design tokens, responsive layout, and motion
 backend/                  FastAPI service
   app/main.py             API routes and application setup
@@ -49,6 +50,8 @@ npm run dev
 
 Open the Vite URL (usually `http://localhost:5173`). Set `VITE_API_URL` in `frontend/.env` if the API uses another address. Create a quiz, open its host link in one browser tab, and visit the participant link in another. `npm run build` creates a static production build in `frontend/dist/`.
 
+Run the frontend demo quiz logic checks from `frontend/` with `npm test` (Node's built-in test runner).
+
 ## API outline
 
 - `GET /api/health` — liveness check.
@@ -64,4 +67,4 @@ Treat host links and participant reconnect tokens as bearer secrets. Keep `.env`
 
 The lobby broadcaster is in memory, so run one API worker per instance. Multi-worker deployments need shared pub/sub before they can reliably deliver lobby updates.
 
-No automated test suite or linter is configured in this first iteration. Add coverage for quiz validation, display-name conflicts, host authorization, and the complete timed game flow as those milestones are implemented.
+The frontend demo quiz has automated checks for the 30-question bank, category shuffling, and correct-answer association. Add backend coverage for quiz validation, display-name conflicts, host authorization, and the complete timed game flow as those milestones are implemented.
