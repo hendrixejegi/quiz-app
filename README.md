@@ -6,7 +6,7 @@ A live quiz MVP with a React host/participant interface and a FastAPI backend. P
 
 The app supports quiz creation (1–20 questions, 2–4 answers, 5–300 second timer setting), separate participant and private host links, and joining with a unique display name. During a live quiz, correct answers award 100 points and the host sees the full live leaderboard. During each five-second results interval, participants see the top three, their rank movement, whether their answer was correct, and points earned. After the final interval, they see final standings and a review of their own answers against the correct answers. Correct answers are not sent to participant endpoints before completion. Host and reconnect secrets are stored as hashes and issued only when needed.
 
-This iteration uses SQLite by default for quick local setup and accepts a PostgreSQL `DATABASE_URL`. Host state and live standings arrive over an authenticated WebSocket; participants resync state once per second. The API calculates standings from stored answers, so there is no score migration. Durable reconnect, migrations, BetterAuth admin, rate limiting, and deployment remain future milestones from `PLAN.md`; this is not yet production ready.
+This iteration uses SQLite by default for quick local setup and accepts a PostgreSQL `DATABASE_URL`. Host state and live standings arrive over an authenticated WebSocket, with the host state also resynced once per second as a fallback; participants resync state once per second. The API calculates standings from stored answers, so there is no score migration. Durable reconnect, migrations, BetterAuth admin, rate limiting, and deployment remain future milestones from `PLAN.md`; this is not yet production ready.
 
 ## Repository layout
 
@@ -69,7 +69,7 @@ Correct answers earn 100 points; incorrect and unanswered questions earn zero. T
 
 Treat host links and participant reconnect tokens as bearer secrets. Keep `.env` files out of version control. The host URL keeps its credential in the URL fragment so browsers do not send it as part of the HTTP request; the frontend uses it only in the authorization header. Database tables are currently created automatically at API startup; add versioned migrations before evolving a deployed database.
 
-The lobby broadcaster is in memory, so run one API worker per instance. Multi-worker deployments need shared pub/sub before they can reliably deliver lobby updates.
+The lobby broadcaster is in memory, so run one API worker per instance for reliable immediate WebSocket updates. The host's one-second state resync also picks up changes missed by a WebSocket in multi-worker deployments, provided all workers use the same database; shared pub/sub is still needed for consistently immediate pushes across workers.
 
 The frontend demo quiz has automated checks for its question banks, category shuffling, and correct-answer association. Add backend coverage for quiz validation, display-name conflicts, host authorization, and the complete timed game flow as those milestones are implemented.
 

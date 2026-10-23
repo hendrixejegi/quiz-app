@@ -93,6 +93,7 @@ export default function App() {
   const [created, setCreated] = useState(null);
   const [event, setEvent] = useState(null);
   const [hostInfo, setHostInfo] = useState(null);
+  const [hostRefreshError, setHostRefreshError] = useState('');
   const [hostConnection, setHostConnection] = useState('connecting');
   const [participant, setParticipant] = useState(null);
   const [clockTick, setClockTick] = useState(Date.now());
@@ -174,14 +175,41 @@ export default function App() {
       }
     } else if (hostEventId) {
       setView('host');
-      api(`/api/host/${hostEventId}`, { headers: { Authorization: `Bearer ${hostToken}` } })
-        .then((data) => alive && setHostInfo(data))
-        .catch((reason) => alive && setError(reason.message));
     } else {
       setView('create');
     }
     return () => { alive = false; };
   }, [joinCode, hostEventId, hostToken]);
+
+  useEffect(() => {
+    if (!hostEventId || !hostToken) return undefined;
+
+    let active = true;
+    let refreshTimer;
+    const refreshHostState = async () => {
+      try {
+        const data = await api(`/api/host/${hostEventId}`, {
+          headers: { Authorization: `Bearer ${hostToken}` },
+        });
+        if (!active) return;
+        setHostInfo(data);
+        setHostRefreshError('');
+        if (data.state !== 'completed') {
+          refreshTimer = window.setTimeout(refreshHostState, 1000);
+        }
+      } catch (reason) {
+        if (!active) return;
+        setHostRefreshError(reason.message);
+        refreshTimer = window.setTimeout(refreshHostState, 1000);
+      }
+    };
+
+    refreshHostState();
+    return () => {
+      active = false;
+      window.clearTimeout(refreshTimer);
+    };
+  }, [hostEventId, hostToken]);
 
   useEffect(() => {
     if (!hostEventId || !hostToken) return undefined;
@@ -205,6 +233,7 @@ export default function App() {
         }
         if (message.type === 'host_lobby') {
           setHostInfo(message.data);
+          setHostRefreshError('');
           setHostConnection('connected');
         } else if (message.type === 'error') {
           setError(message.detail);
@@ -518,6 +547,7 @@ export default function App() {
         </div>}
 
         {view === 'host' && <div className="host-wrap">
+          {hostRefreshError && <div className="notice-card error-message" role="alert">{hostRefreshError}</div>}
           {error && !hostInfo ? <div className="notice-card error-message" role="alert">{error}</div> : hostInfo && <>
             <div className="eyebrow"><span className="eyebrow-line" />HOST CONTROL<span className="eyebrow-line" /></div><h1 className="host-title">{hostInfo.title}<br /><span className="gradient-text">{hostInfo.state === 'lobby' ? 'lobby.' : hostInfo.state === 'completed' ? 'complete.' : 'live.'}</span></h1>
             <div className="host-stats"><div className="stat-card"><span className="section-kicker">IN THE ROOM</span><strong>{String(hostInfo.participant_count).padStart(2, '0')}</strong><span className="stat-caption">of 50 players</span></div><div className="stat-card"><span className="section-kicker">JOIN CODE</span><strong className="stat-code">{hostInfo.join_code}</strong><button className={`copy-inline${copiedValue === hostInfo.join_code ? ' copied' : ''}`} onClick={() => copy(hostInfo.join_code)} aria-live="polite">{copiedValue === hostInfo.join_code ? <Check size={14} /> : <Copy size={14} />} {copiedValue === hostInfo.join_code ? 'Copied' : 'Copy code'}</button></div></div>
