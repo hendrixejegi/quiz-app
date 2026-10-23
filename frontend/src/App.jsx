@@ -88,6 +88,7 @@ export default function App() {
   const [location, setLocation] = useLocationState();
   const [view, setView] = useState('create');
   const [error, setError] = useState('');
+  const [copiedValue, setCopiedValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState(null);
   const [event, setEvent] = useState(null);
@@ -356,7 +357,32 @@ export default function App() {
   }
 
   async function copy(value) {
-    try { await navigator.clipboard.writeText(value); } catch { setError('Clipboard access is unavailable. Copy the link manually.'); }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        throw new Error('Clipboard API unavailable');
+      }
+      setCopiedValue(value);
+      window.setTimeout(() => setCopiedValue((current) => current === value ? '' : current), 1800);
+    } catch {
+      try {
+        const field = document.createElement('textarea');
+        field.value = value;
+        field.setAttribute('readonly', '');
+        field.style.position = 'fixed';
+        field.style.opacity = '0';
+        document.body.appendChild(field);
+        field.select();
+        const copied = document.execCommand('copy');
+        field.remove();
+        if (!copied) throw new Error('Clipboard copy failed');
+        setCopiedValue(value);
+        window.setTimeout(() => setCopiedValue((current) => current === value ? '' : current), 1800);
+      } catch {
+        setError('Clipboard access is unavailable. Copy the link manually.');
+      }
+    }
   }
 
   async function startQuiz() {
@@ -485,7 +511,7 @@ export default function App() {
           <div className="success-icon"><Check size={27} /></div><div className="eyebrow"><span className="eyebrow-line" />ROOM IS READY<span className="eyebrow-line" /></div>
           <h1>Let the game<br /><span className="gradient-text">find its people.</span></h1>
           <p className="hero-copy">Your quiz <strong>{created.title}</strong> is waiting in the lobby.</p>
-          <div className="share-card"><span className="section-kicker">PARTICIPANT LINK</span><div className="share-value"><span>{created.participant_url}</span><button className="copy-button" onClick={() => copy(created.participant_url)}><Copy size={15} /> Copy</button></div><div className="join-code">JOIN CODE <strong>{created.join_code}</strong></div></div>
+          <div className="share-card"><span className="section-kicker">PARTICIPANT LINK</span><div className="share-value"><span>{created.participant_url}</span><button className={`copy-button${copiedValue === created.participant_url ? ' copied' : ''}`} onClick={() => copy(created.participant_url)} aria-live="polite">{copiedValue === created.participant_url ? <Check size={15} /> : <Copy size={15} />} {copiedValue === created.participant_url ? 'Copied' : 'Copy'}</button></div><div className="join-code">JOIN CODE <strong>{created.join_code}</strong></div></div>
           <a className="primary-button host-button" href={created.host_url}>Open host lobby <ArrowRight size={17} /></a>
           <p className="private-note">Keep your host link private. Anyone with it can control this quiz.</p>
         </div>}
@@ -512,7 +538,7 @@ export default function App() {
         {view === 'host' && <div className="host-wrap">
           {error && !hostInfo ? <div className="notice-card error-message" role="alert">{error}</div> : hostInfo && <>
             <div className="eyebrow"><span className="eyebrow-line" />HOST CONTROL<span className="eyebrow-line" /></div><h1 className="host-title">{hostInfo.title}<br /><span className="gradient-text">{hostInfo.state === 'lobby' ? 'lobby.' : hostInfo.state === 'completed' ? 'complete.' : 'live.'}</span></h1>
-            <div className="host-stats"><div className="stat-card"><span className="section-kicker">IN THE ROOM</span><strong>{String(hostInfo.participant_count).padStart(2, '0')}</strong><span className="stat-caption">of 50 players</span></div><div className="stat-card"><span className="section-kicker">JOIN CODE</span><strong className="stat-code">{hostInfo.join_code}</strong><button className="copy-inline" onClick={() => copy(hostInfo.join_code)}><Copy size={14} /> Copy code</button></div></div>
+            <div className="host-stats"><div className="stat-card"><span className="section-kicker">IN THE ROOM</span><strong>{String(hostInfo.participant_count).padStart(2, '0')}</strong><span className="stat-caption">of 50 players</span></div><div className="stat-card"><span className="section-kicker">JOIN CODE</span><strong className="stat-code">{hostInfo.join_code}</strong><button className={`copy-inline${copiedValue === hostInfo.join_code ? ' copied' : ''}`} onClick={() => copy(hostInfo.join_code)} aria-live="polite">{copiedValue === hostInfo.join_code ? <Check size={14} /> : <Copy size={14} />} {copiedValue === hostInfo.join_code ? 'Copied' : 'Copy code'}</button></div></div>
             <div className="players-card"><div className="players-heading"><div><span className="section-kicker">THE CROWD</span><h2>Players in the room</h2></div><div className="host-indicators"><span className="event-state-pill">{hostInfo.state.toUpperCase()}</span><span className={`live-pill connection-${hostConnection}`}><span className="status-dot" />{hostConnection === 'connected' ? 'LIVE' : hostConnection.toUpperCase()}</span></div></div>
               {hostInfo.state === 'lobby' ? (hostInfo.participants.length ? <div className="player-list">{hostInfo.participants.map((player, index) => <div className="player-row" key={`${player.display_name}-${index}`}><span className="player-avatar">{player.display_name.slice(0, 1).toUpperCase()}</span><span>{player.display_name}</span><span className="player-private">{player.name}</span></div>)}</div> : <div className="empty-players"><Users size={22} /><p>Share the join code and your players will appear here.</p></div>) : <><div className="host-live-summary">{hostInfo.state === 'completed' ? 'Final standings' : hostInfo.state === 'results' ? 'Question results' : `Question ${Number(hostInfo.current_question_position ?? 0) + 1} of ${hostInfo.question_count}`}</div><RankingList entries={hostInfo.leaderboard || []} showPoints /></>}
               {hostInfo.state === 'lobby' ? <button className="primary-button start-quiz-button" onClick={startQuiz} disabled={busy || hostInfo.participant_count === 0}>{busy ? 'Starting…' : <>Start quiz <ArrowRight size={17} /></>}</button> : <p className="quiz-started">{hostInfo.state === 'completed' ? 'Quiz complete.' : 'Standings update live as answers come in.'}</p>}
