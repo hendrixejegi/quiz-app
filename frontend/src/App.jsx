@@ -146,8 +146,7 @@ export default function App() {
           if (!alive) return;
           setEvent(data);
           setParticipant({
-            participant_id: data.participant_id,
-            display_name: data.display_name,
+            display_name: data.participant_display_name,
             reconnect_token: reconnectToken,
           });
           try {
@@ -242,23 +241,6 @@ export default function App() {
     const interval = window.setInterval(refreshParticipantState, 1000);
     return () => { alive = false; window.clearInterval(interval); };
   }, [joinCode, participant?.reconnect_token]);
-
-  useEffect(() => {
-    if (!joinCode || participant) return undefined;
-    const reconnectToken = sessionStorage.getItem(`quiz:${joinCode}:reconnect`);
-    if (!reconnectToken) return undefined;
-    let alive = true;
-    api(`/api/events/${encodeURIComponent(joinCode)}/state`, {
-      headers: { Authorization: `Bearer ${reconnectToken}` },
-    }).then((data) => {
-      if (!alive) return;
-      setEvent(data);
-      setParticipant({ reconnect_token: reconnectToken, display_name: data.participant_display_name });
-    }).catch(() => {
-      if (alive) sessionStorage.removeItem(`quiz:${joinCode}:reconnect`);
-    });
-    return () => { alive = false; };
-  }, [joinCode, participant]);
 
   useEffect(() => {
     if (!event?.deadline_at) return undefined;
