@@ -50,7 +50,7 @@ async def lifespan(_: FastAPI):
         pass
 
 
-app = FastAPI(title="Live Quiz Competition API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="QuizPop API", version="0.1.0", lifespan=lifespan)
 frontend_origins = [origin.strip() for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,

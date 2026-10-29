@@ -1,109 +1,70 @@
-# Live Quiz Competition — Design Spec
 
-## Product intent
+# QuizPop — Design Specification
 
-Create a clear, lively interface for hosting and playing a timed quiz. The experience should feel responsive and social while keeping the current question, timer, answer state, and standings easy to understand. The server remains authoritative for time and scoring; the interface reflects those states and communicates transitions.
+## Identity and product intent
 
-## Visual direction
+QuizPop turns a room full of people into a friendly live quiz competition. The identity is playful, confident, and comic-inspired: bold ink, flat color, crisp offset shadows, and expressive typography. Keep the current question, timer, accepted answer, and standings immediately understandable.
 
-Use the attached Aura design notes as a visual reference, adapted to the quiz product. Keep the interface light, spacious, and energetic, with a deep purple primary color and a restrained red accent. Prefer a distinctive question or leaderboard composition over a generic analytics dashboard or uniform card grid. Motion should reinforce live activity without competing with quiz content.
+The original logo is a lavender Q speech bubble with a golden comic burst, dark outlines, and a warm-white counter. The wordmark reads **QuizPop**, with both words joined and capitalized. Use `frontend/public/quizpop-mark.svg` for the header and favicon. Keep the mark uncropped, at least 32px wide in the interface, with clear space around it. Its built-in colors stay constant in both themes. The home control has the accessible name “QuizPop home”; its adjacent logo image is decorative.
 
-### Design tokens
+Adapted from the supplied Cole Martin design notes: palette, Space Grotesk/Space Mono, 8px spacing, and compact corner geometry. The supplied quiz screenshot informs color blocking, dark outlines, and comic energy. Neither reference supplies product copy, features, or navigation. Do not reproduce its character artwork or import portfolio sections.
 
-| Role | Value |
-| --- | --- |
-| Primary | `#5B1E91` |
-| Secondary | `#FFFFFF` |
-| Accent | `#EB0000` |
-| Background | `#FFFFFF` |
-| Surface | `#BDB5E9` |
-| Primary text | `#111827` |
-| Secondary text | `#4B5563` |
-| Border | `#AFAFB6` |
+## Color and typography
 
-Use primary purple for key actions and active states. Reserve red for urgent or time-sensitive emphasis, and preserve readable contrast for all text and controls. Use the lavender surface selectively for panels and supporting content.
+| Role | Token | Value | Application |
+| --- | --- | --- | --- |
+| Primary | `--primary` | `#A79CFF` | Main actions, ready-made quiz section, selected answer |
+| Highlight | `--yellow` | `#F4B942` | Quiz count, second demo action, first-place medal |
+| Supporting / positive | `--mint` | `#88C999` | Success icon, third demo action, positive outcome edge |
+| Ground | `--ground` | `#F9F8F5` | Warm-white page |
+| Surface | `--surface` | `#FFFFFF` | Forms, sharing, host controls, answers |
+| Inset | `--inset` | `#F0EEE8` | Question editor and neutral badges |
+| Fixed ink | `--ink` | `#111827` | Outlines and labels on bright brand fills |
+| Text | `--text` | `#111827` | Main text |
+| Secondary text | `--muted` | `#4B5563` | Instructions, labels, metadata |
+| Positive text / tint | `--positive` / `--positive-bg` | `#245E37` / `#DBF0DF` | Confirmed positive outcomes |
+| Error text / tint | `--negative` / `--negative-bg` | `#A8233C` / `#FFE7EB` | Validation and failed outcomes |
+| Warning text / tint | `--warning` / `--warning-bg` | `#704600` / `#FBE8BA` | Connecting and reconnecting |
 
-### Type
+Use dark ink on lavender, yellow, and mint; do not put white button labels on these fills. Avoid gradients, glows, transparency effects, and soft blurred shadows. The page stays mostly neutral; large color fields belong to quiz discovery, actions, selections, and celebrations. Distinguish semantic outcomes with words and icons as well as color.
 
-- Display and body: Plus Jakarta Sans, with a compatible sans-serif fallback.
-- Technical labels and compact metadata: JetBrains Mono, with a monospace fallback.
-- Use large display type sparingly for quiz prompts and key result moments. Keep instructions and answer text comfortably readable on mobile.
+Dark mode uses neutral charcoal `#171717`, surfaces `#242424`, inset panels `#303030`, warm-white text `#F9F8F5`, secondary text `#CBC8C0`, and visible outlines `#AAA69F`. Retain the original brand fills with fixed dark ink. Semantic text/tint pairs become lighter-on-dark: positive `#A3DDB2`/`#233C2B`, error `#FFA5B5`/`#42232B`, warning `#F4CB79`/`#44381F`.
 
-### Spacing and shape
+- **Space Grotesk:** headings, wordmark, buttons, controls, answer text, and strong emphasis. Use weights 400–700. Desktop display reaches 80px at 1.04 line-height; mobile starts around 40px. Question prompts use 24–34px with a readable 1.35 line-height.
+- **Space Mono:** body, labels, instructions, timer figures, codes, and metadata. Body is 13–16px at roughly 1.7 line-height; metadata is 11–12px. Inputs remain at least 16px. Use monospace and sans-serif fallbacks so unavailable webfonts never block the interface.
+- Keep headings in one ink color. Permit long user-created questions, quiz titles, and names to wrap; never truncate essential content.
 
-- Base spacing unit: `8px`.
-- Common gap: `16px`.
-- Card padding: `24px`.
-- Section spacing: `80px` on wide layouts; reduce responsively on smaller screens.
-- Card radius: `32px`.
-- Control radius: `24px`.
-- Pill radius: `9999px`.
+## Geometry, components, and layout
 
-Use subtle borders and restrained shadows to separate nested surfaces. Do not use a shadow or color alone to communicate state.
+Use an 8px spacing rhythm, 12–16px control gaps, 20–30px panel padding, and 48–80px major section spacing. The page frame has equal outer margins and a 1440px maximum; the main content is about 980px wide. Forms and lobby screens use narrower readable measures.
 
-## Information architecture and screens
+Cards and controls have 8px corners and 2px outlines. Resting major panels have a crisp `4px 4px 0 #111827` shadow; buttons use 3px offsets. Nested inputs use an outline without a competing shadow. Keep round shapes for the correct-answer selector, status dots, and podium medals. Avoid decorating every row or adding comic artwork beside active questions.
 
-### Host setup
+Buttons have at least 44px touch targets, visible focus, and brief physical hover/press movement. A disabled action looks disabled and does not move on hover. Copy controls show the existing confirmed “Copied” state. Correct-answer selectors have a 44px hit area around the smaller visual ring.
 
-Provide a focused, stepwise form for quiz title and question entry. Make question order, timer duration, answer choices, and correct-answer selection explicit. Show validation beside the relevant field and a clear path to review before launch. Explain that launching creates a participant join URL and a separate private host control URL.
+### Existing screen hierarchy
 
-### Host live control
+- **Home and creation:** “Make your next quiz pop.” introduces the product. A lavender ready-made quiz section contains the real categories and start actions in lavender, yellow, and mint. Join-by-code and custom quiz creation remain immediately identifiable. The builder shows title, question order, choices, correct-answer selectors, timer settings, validation, and creation actions.
+- **Link issuance:** a mint success mark leads into the participant URL and join code, a copy action, and the private host-lobby action. Explain that the host link is a secret.
+- **Participant join and lobby:** emphasize the quiz title, room information, identity fields, waiting state, and concise play instructions. Preserve entered values after validation errors.
+- **Host:** emphasize quiz state, participant count, join code, connection state, roster or standings, and the real start action. Keep secret host credentials out of visible share content.
+- **Active play:** prioritize question text, persistent countdown, flat progress bar, and large answer buttons. A selected answer uses lavender plus a pressed state; acceptance remains server-confirmed. Urgency uses text and color without flashing.
+- **Question results:** show personal outcome, awarded points, rank movement, and the top three. Display connection and timer transitions clearly without moving the leaderboard unexpectedly.
+- **Final results:** gold, lavender, and mint medals mark the top three, followed by remaining rankings and per-question review. Support ties, one or two participants, and long names. Reveal correct answers only when the server permits.
+- **Future administration:** use the same readable forms and neutral surfaces. Destructive deletion must name the event and associated data affected. This rebrand adds no admin screens.
 
-Keep the current question, remaining time, participant count, and event state prominent. Provide a clear start action in the lobby and a clear close action when the event is complete. During play, show operational information such as answer progress and the next transition without letting controls compete with the question. Make the private nature of the host link clear at issuance.
+On tablet, reduce outer margins to 32px and stack the results side panel once its columns become cramped. At 700px and below, use 20px outer margins, stacked demo categories, single-column answer editing, full-width primary actions, and an icon-only theme toggle with its accessible label intact. Keep score and name columns readable, wrap names and URLs, and prevent page-level horizontal scrolling at 320px and above.
 
-### Participant join and lobby
+## Motion, accessibility, and live states
 
-Make the join code or join link immediately recognizable. Ask for the required name and unique display name with concise explanations. After joining, show that the participant is waiting and provide live confirmation when the host starts. If a display name is unavailable or the room is full, preserve entered values and explain the next step.
+Use 150ms press/hover feedback and stable timer progress. Restrict ambient motion to a small waiting dot. Under `prefers-reduced-motion: reduce`, disable animation and transitions. Avoid entrance effects that delay questions or answer controls.
 
-### Participant play
+Every interactive element must support keyboard focus and a visible outline. Associate fields with labels or accessible names, retain pressed states on selected answers and correct-choice controls, and use polite status messages where appropriate. Aim for WCAG AA text contrast; never rely solely on color, shadows, or position for an outcome. Countdown announcements should communicate meaningful thresholds rather than every second.
 
-Give the question prompt and answer choices the strongest visual priority. Show the countdown as a persistent, legible element and indicate when an answer is selected or submitted. Communicate closed questions, late submissions, and connection recovery in plain language. Do not imply that an answer was accepted until the server confirms it.
+Design loading, connecting, reconnecting, offline, empty quiz, invalid content, waiting lobby, active question, submitted answer, expired question, intermediate standings, and final review. Errors such as duplicate names, invalid links, full rooms, rejected answers, and connection failures use clear text within the relevant area.
 
-### Results and leaderboard
+## Behavioral boundaries and compatibility
 
-After each question, show updated standings and each participant’s own outcome during the results interval. Reveal correct answers only after the final question. Give rank changes and score totals clear hierarchy without relying on color alone. Keep final results available until the host closes the event.
+The server owns deadlines, session transitions, accepted answers, and scoring. Preserve current routes, API contracts, quiz limits, fixed scoring, late-join rules, reconnect tokens, and the final-answer reveal policy. Preserve the legacy theme storage key so existing preferences survive the rebrand; participant session storage must also remain intact. This change requires no database migration.
 
-### Admin
-
-Use a compact, utilitarian interface for authenticated super-admins to locate events and review identifying metadata before deletion. Make destructive deletion unmistakable and summarize that associated participants, answers, and results are removed.
-
-## Layout and responsive behavior
-
-- Establish a clear content width and consistent alignment across the host and participant flows.
-- On wide screens, use space for supportive live context such as answer progress or standings while maintaining a single focal question.
-- On narrow screens, stack content in task order; keep the timer and primary answer actions visible without horizontal scrolling.
-- Preserve visual hierarchy and touch target size as layouts collapse. Avoid shrinking dense desktop panels into unreadable mobile cards.
-- Use compact dashboard panels for live metrics, but keep question and answer surfaces distinct from supporting metrics.
-
-## Interaction and motion
-
-- Use restrained entrance transitions when entering a room or moving between question and results states.
-- Animate timer progress smoothly and make the final seconds perceptible without flashing or relying only on color.
-- Use small hover and press feedback for controls; respect reduced-motion preferences.
-- Use staggered reveals only for secondary content such as leaderboard rows. Keep live updates stable so content movement does not make it hard to follow.
-- Make reconnecting and resynchronizing visible, with a clear return to the current server state.
-
-## Accessibility and state communication
-
-- Support keyboard navigation and visible focus states for every interactive control.
-- Associate labels and validation messages with form fields; announce important live state changes appropriately to assistive technology.
-- Provide text or icon cues alongside color for selected, correct, incorrect, expired, and disconnected states.
-- Maintain sufficient contrast and respect reduced-motion settings.
-- Ensure countdown updates do not overwhelm screen readers; announce meaningful thresholds and state changes instead of every tick.
-
-## UI states to design
-
-- Loading, connecting, reconnecting, and connection lost.
-- Empty quiz setup and invalid quiz content.
-- Lobby waiting, event starting, active question, answer submitted, and question expired.
-- Results interval and final results.
-- Full room, duplicate display name, invalid or expired link, and rejected/late answer.
-- Host closed event and admin deletion confirmation/result.
-
-## Product constraints
-
-- The server controls deadlines, accepted answers, session transitions, and scoring. Client visuals must not suggest otherwise.
-- A participant may join between questions and scores only from questions they can answer.
-- The participant view must never expose the private host credential or pre-final correct answers.
-- Support the planned room size of up to 50 participants without making the participant or host views visually noisy.
-
+Validate with existing frontend and backend tests, a production frontend build, screenshots at desktop/tablet/mobile sizes in both themes, keyboard and reduced-motion checks, and the host-to-results flow against a running API. Test long names and prompts as well as normal content. Document any checks the environment prevents.

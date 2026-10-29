@@ -1,6 +1,8 @@
-# Live Quiz Competition
+# QuizPop
 
 A live quiz MVP with a React host/participant interface and a FastAPI backend. Product scope is in [PLAN.md](PLAN.md), visual guidance is in [DESIGN.md](DESIGN.md), and contributor conventions are in [AGENTS.md](AGENTS.md).
+
+QuizPop uses a comic-inspired lavender, gold, and mint identity, with Space Grotesk and Space Mono typography, light and dark themes, and an original SVG logo in `frontend/public/quizpop-mark.svg`. Existing saved theme preferences and participant reconnect sessions remain compatible; the rebrand requires no database migration.
 
 ## First iteration
 

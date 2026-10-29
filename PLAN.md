@@ -1,4 +1,4 @@
-# Live Quiz Competition MVP Plan
+# QuizPop MVP Plan
 
 ## Goal
 
