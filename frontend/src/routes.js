@@ -1,23 +1,63 @@
 import { replace } from 'react-router';
-
-// Existing quiz links remain valid; replace avoids an extra Back-button stop.
 export function legacyJoinLoader({ request }) {
   const joinCode = new URL(request.url).searchParams.get('join');
   return joinCode ? replace(`/join/${encodeURIComponent(joinCode)}`) : null;
 }
-
-// Keep the route table independent of the browser and screen implementations.
-// Tests use the same table with createMemoryRouter.
-export function createAppRoutes({ Layout, QuizPage, LoginPage, NotFoundPage, RouteErrorPage, RootErrorPage }) {
-  return [{
-    Component: Layout,
-    ErrorBoundary: RootErrorPage,
-    children: [
-      { index: true, loader: legacyJoinLoader, Component: QuizPage, ErrorBoundary: RouteErrorPage },
-      { path: 'join/:joinCode', Component: QuizPage, ErrorBoundary: RouteErrorPage },
-      { path: 'host/:eventId', Component: QuizPage, ErrorBoundary: RouteErrorPage },
-      { path: 'login', Component: LoginPage, ErrorBoundary: RouteErrorPage },
-      { path: '*', Component: NotFoundPage },
-    ],
-  }];
+export function legacyLoginLoader({ request }) {
+  const url = new URL(request.url);
+  return replace(`/account/login${url.search}${url.hash}`);
+}
+export function createAppRoutes({
+  Layout,
+  HomePage,
+  HostPage,
+  ParticipantPage,
+  LoginPage,
+  RegisterPage,
+  ForgotPasswordPage,
+  ResetPasswordPage,
+  VerifyEmailPage,
+  ProfilePage,
+  NotFoundPage,
+  RouteErrorPage,
+  RootErrorPage,
+}) {
+  return [
+    {
+      Component: Layout,
+      ErrorBoundary: RootErrorPage,
+      children: [
+        {
+          index: true,
+          loader: legacyJoinLoader,
+          Component: HomePage,
+          ErrorBoundary: RouteErrorPage,
+        },
+        {
+          path: 'join/:joinCode',
+          Component: ParticipantPage,
+          ErrorBoundary: RouteErrorPage,
+        },
+        {
+          path: 'host/:eventId',
+          Component: HostPage,
+          ErrorBoundary: RouteErrorPage,
+        },
+        { path: 'login', loader: legacyLoginLoader },
+        ...[
+          ['login', LoginPage],
+          ['register', RegisterPage],
+          ['forgot', ForgotPasswordPage],
+          ['reset', ResetPasswordPage],
+          ['verify', VerifyEmailPage],
+          ['profile', ProfilePage],
+        ].map(([path, Component]) => ({
+          path: `account/${path}`,
+          Component,
+          ErrorBoundary: RouteErrorPage,
+        })),
+        { path: '*', Component: NotFoundPage },
+      ],
+    },
+  ];
 }

@@ -14,7 +14,14 @@ This iteration uses SQLite by default for quick local setup and accepts a Postgr
 
 ```text
 frontend/                 Vite + React client
-  src/App.jsx             Quiz creation, join, lobby, and demo host onboarding
+  src/App.jsx             Shared providers and the mounted router
+  src/router.jsx          Page components wired into the route table
+  src/routes.js           Routes and backwards-compatible redirects
+  src/pages/              Creation, host, participant, and account pages
+  src/components/         Reusable quiz, live-game, account, and layout controls
+  src/contexts/           Authentication, theme, and in-memory quiz drafts
+  src/hooks/              Page actions, countdown, clipboard, and room subscriptions
+  src/live/               Independently tested host/participant transport lifecycles
   src/demoQuiz.js         Local demo question banks, shuffling, and API payloads
   src/styles.css          Design tokens, responsive layout, and motion
 backend/                  FastAPI service
@@ -53,7 +60,7 @@ npm run dev
 
 Open the Vite URL (usually `http://localhost:5173`). Leave `VITE_API_URL` empty for same-origin requests. Vite proxies `/api` (including host WebSockets) to `API_PROXY_TARGET`, which defaults to `http://127.0.0.1:8000`; set `API_PROXY_TARGET` in `frontend/.env` if your local backend uses another port, then restart Vite. Set `VITE_API_URL` only for an explicitly separate same-site API deployment. Register and verify an account, sign in, create a quiz, open its host link in one browser tab, and visit the participant link in another. `npm run build` creates a static production build in `frontend/dist/`.
 
-Run the frontend demo quiz logic checks from `frontend/` with `npm test` (Node's built-in test runner).
+Run frontend route, API, room lifecycle, countdown, and demo quiz checks from `frontend/` with `npm test` (Node's built-in test runner).
 
 ## API outline
 
@@ -98,7 +105,7 @@ pip install -r requirements-dev.txt
 python -m pytest tests/test_auth.py tests/test_auth_migration.py -q
 ```
 
-Do not point these tests at a real database: account rows are cleared by the fixture. `tests/test_participant_answers.py` uses its own in-memory database. Frontend checks: `npm test` and `npm run build` from `frontend/`. The React Router files and their tests are retained for future routing work; the current frontend entry point still mounts `App` directly.
+Do not point these tests at a real database: account rows are cleared by the fixture. `tests/test_participant_answers.py` uses its own in-memory database. Frontend checks: `npm test` and `npm run build` from `frontend/`. React Router is mounted through `App`; route, API cancellation, and room-subscription tests run against the same modules used by the pages.
 
 Before production: configure and exercise real Google/SMTP flows, run migration against a PostgreSQL staging copy, verify HTTPS cookie/proxy and WebSocket routing, and add shared rate limiting/abuse controls and monitoring. Organisation memberships, group permissions, and a platform-admin portal are separate planned features; authentication does not yet create those domain models.
 
@@ -142,3 +149,14 @@ python -m pytest tests/test_auth_migration.py -q
 On Windows, use `--loop app.runtime:create_event_loop` when starting Uvicorn, including without reload. Psycopg async PostgreSQL connections require a Selector event loop; the default Proactor loop fails when an account route first accesses the database.
 
 The canonical presentation deck is `presentation-output/live-quiz-demo.pptx`. The PDF and architecture guide remain reference documents. Generated presentation intermediates are excluded from version control.
+
+
+## Frontend navigation and state
+
+The shared application layout owns navigation and the footer. The home page owns quiz creation and its confirmation; host and participant pages own their room state. Account pages share form controls and layout. Authentication and theme contexts span every page; the quiz draft context preserves unsaved questions across internal navigation until a browser refresh. There is no additional global state library.
+
+Routes are `/`, `/join/:joinCode`, `/host/:eventId`, and `/account/login`, `/account/register`, `/account/forgot`, `/account/reset`, `/account/verify`, `/account/profile`. Existing `/?join=CODE` links replace-redirect to the participant route; `/login` redirects to `/account/login`. Legacy host credentials stay in URL fragments. Verification/recovery tokens stay in query parameters until successful use. Unknown routes show a not-found page.
+
+Host hooks fetch an initial snapshot, use authenticated WebSocket updates (including empty handshakes for account-owned rooms), and fall back to one-second polling with reconnect attempts. Authorization failure clears protected data and stops retries. Participant hooks retain the existing sessionStorage reconnect keys and restore server-saved answers. Leaving a room aborts outstanding requests, closes its socket, and clears timers. The API helper exposes HTTP status through `ApiError.status` and passes action cancellation through CSRF preparation and the final request.
+
+Use `npm ci` from `frontend/` for a reproducible dependency installation; the frontend lockfile includes React Router. For browser validation, use an isolated backend/database and check draft preservation across sign-in, account forms and theme changes, legacy URLs, host/guest play, reload reconnect, final review, and logout/revocation. Check light/dark layouts at 390, 768, and 1440 pixels. No backend migration is required for this frontend refactor.

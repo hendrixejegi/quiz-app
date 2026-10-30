@@ -14,3 +14,4 @@ frontend/dist/
 package-lock.json
 
 .packages/
+!frontend/package-lock.json
