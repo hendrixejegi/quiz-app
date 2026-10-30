@@ -1,1 +1,1 @@
-"""Live Quiz Competition API."""
+"""QuizPop API."""

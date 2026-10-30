@@ -6,15 +6,16 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import Request, BackgroundTasks, Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func, inspect, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .database import Base, SessionLocal, engine, get_db
+from .database import SessionLocal, get_db
 from .models import Choice, Event, Participant, ParticipantAnswer, Question
 from .schemas import AnswerSubmit, ParticipantJoin, QuizCreate
+from .auth import router as auth_router, current_user, optional_user, websocket_user
 
 POINTS_PER_CORRECT_ANSWER = 100
 RESULTS_INTERVAL_SECONDS = 5
@@ -22,14 +23,6 @@ RESULTS_INTERVAL_SECONDS = 5
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    # create_all does not add columns to an existing SQLite/Postgres events table.
-    columns = {column["name"] for column in inspect(engine).get_columns("events")}
-    with engine.begin() as connection:
-        if "current_question_position" not in columns:
-            connection.exec_driver_sql("ALTER TABLE events ADD COLUMN current_question_position INTEGER")
-        if "timer_deadline" not in columns:
-            connection.exec_driver_sql("ALTER TABLE events ADD COLUMN timer_deadline TIMESTAMP WITH TIME ZONE")
     # Older versions could persist an active state but had no timer fields.
     with SessionLocal() as db:
         legacy_active_events = db.scalars(select(Event).where(
@@ -50,15 +43,79 @@ async def lifespan(_: FastAPI):
         pass
 
 
-app = FastAPI(title="Live Quiz Competition API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="QuizPop API", version="0.1.0", lifespan=lifespan)
 frontend_origins = [origin.strip() for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=frontend_origins,
-    allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"],
 )
+
+app.include_router(auth_router)
+
+@app.middleware("http")
+async def csrf_protection(request: Request, call_next):
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        origin = request.headers.get("origin")
+        cookie = request.cookies.get("quizpop_csrf", "")
+        supplied = request.headers.get("x-csrf-token", "")
+        if origin not in frontend_origins or not cookie or not secrets.compare_digest(cookie, supplied):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "Invalid request origin or CSRF token. Refresh and try again."}, status_code=403)
+    oauth_authorize = request.url.path.endswith('/authorize') and request.url.path.startswith('/api/auth/')
+    oauth_callback = request.url.path.endswith('/callback') and request.url.path.startswith('/api/auth/')
+    from urllib.parse import urlsplit
+    referer = urlsplit(request.headers.get('referer', ''))
+    oauth_origin = request.headers.get('origin') or (f'{referer.scheme}://{referer.netloc}' if referer.netloc else '')
+    if oauth_authorize and oauth_origin not in frontend_origins:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({'detail': 'Invalid OAuth origin'}, status_code=403)
+    if oauth_callback:
+        expected = request.cookies.get('quizpop_oauth_state', '')
+        if not expected or not secrets.compare_digest(expected, request.query_params.get('state', '')):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({'detail': 'Invalid OAuth browser state'}, status_code=403)
+    response = await call_next(request)
+    if oauth_authorize and response.status_code == 200:
+        import json
+        from urllib.parse import urlparse, parse_qs
+        from fastapi.responses import JSONResponse
+        body = b''.join([chunk async for chunk in response.body_iterator])
+        data = json.loads(body)
+        state_token = parse_qs(urlparse(data['authorization_url']).query)['state'][0]
+        response = JSONResponse(data)
+        from .auth import SECURE
+        response.set_cookie('quizpop_oauth_state', state_token, secure=SECURE, httponly=True, samesite='lax', max_age=600)
+    if oauth_callback and response.status_code >= 400:
+        from fastapi.responses import RedirectResponse
+        from .auth import FRONTEND
+        response = RedirectResponse(FRONTEND + '/account/login?error=google', status_code=303)
+        response.delete_cookie('quizpop_oauth_state')
+    if oauth_callback and response.status_code < 300:
+        from fastapi.responses import RedirectResponse
+        from .auth import FRONTEND
+        redirected = RedirectResponse(FRONTEND + '/account/profile', status_code=303)
+        for name, value in response.raw_headers:
+            if name == b'set-cookie':
+                redirected.raw_headers.append((name, value))
+        redirected.delete_cookie('quizpop_oauth_state')
+        response = redirected
+    if request.url.path.startswith('/api/auth'):
+        response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+def authorize_host(event, authorization, user):
+    if event is None:
+        raise HTTPException(404, "Quiz not found")
+    if event.owner_id:
+        if user is None or str(user.id) != event.owner_id:
+            raise HTTPException(403, "This quiz belongs to another account. Sign in as its owner.")
+    elif not authorization or not authorization.startswith("Bearer ") or not secrets.compare_digest(token_hash(authorization[7:].strip()), event.host_token_hash):
+        raise HTTPException(403, "Invalid legacy host link")
+
 
 
 class HostConnectionManager:
@@ -273,11 +330,12 @@ def health():
 
 
 @app.post("/api/quizzes", status_code=status.HTTP_201_CREATED)
-def create_quiz(payload: QuizCreate, db: Session = Depends(get_db)):
+def create_quiz(payload: QuizCreate, db: Session = Depends(get_db), user=Depends(current_user)):
     host_token = secrets.token_urlsafe(32)
     event = Event(
         id=str(uuid.uuid4()),
         title=payload.title,
+        owner_id=str(user.id),
         join_code=secrets.token_urlsafe(5).replace("-", "").replace("_", "").upper()[:7],
         host_token_hash=token_hash(host_token),
     )
@@ -297,7 +355,7 @@ def create_quiz(payload: QuizCreate, db: Session = Depends(get_db)):
         "title": event.title,
         "join_code": event.join_code,
         "participant_url": f"/?join={event.join_code}",
-        "host_url": f"/host/{event.id}#{host_token}",
+        "host_url": f"/host/{event.id}",
     }
 
 
@@ -465,46 +523,40 @@ def submit_participant_answer(
 
 
 @app.get("/api/host/{event_id}")
-def get_host_event(event_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Host link required")
-    token = authorization.removeprefix("Bearer ").strip()
+def get_host_event(event_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db), user=Depends(optional_user)):
     event = db.get(Event, event_id)
-    if event is None or not secrets.compare_digest(token_hash(token), event.host_token_hash):
-        raise HTTPException(status_code=403, detail="Invalid host link")
+    authorize_host(event, authorization, user)
     return host_lobby_payload(db, event)
 
 
 @app.websocket("/api/host/{event_id}/ws")
 async def host_lobby_updates(websocket: WebSocket, event_id: str):
+    if websocket.headers.get('origin') not in frontend_origins:
+        await websocket.close(code=4403)
+        return
     await websocket.accept()
     try:
-        token = await websocket.receive_text()
-        with SessionLocal() as db:
-            event = db.get(Event, event_id)
-            if event is None or not secrets.compare_digest(token_hash(token), event.host_token_hash):
-                await websocket.send_json({"type": "error", "detail": "Invalid host link"})
-                await websocket.close(code=4403)
-                return
-            await host_connections.connect(event_id, websocket)
-            await websocket.send_json({"type": "host_lobby", "data": host_lobby_payload(db, event)})
-
+        token = await asyncio.wait_for(websocket.receive_text(), timeout=10)
         while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
+            user = await websocket_user(websocket.cookies.get('quizpop_session'))
+            with SessionLocal() as db:
+                event = db.get(Event, event_id)
+                try:
+                    authorize_host(event, f'Bearer {token}', user)
+                except HTTPException:
+                    await websocket.close(code=4403)
+                    return
+                await websocket.send_json({"type": "host_lobby", "data": host_lobby_payload(db, event)})
+            # Recheck database session and ownership before every protected update.
+            await asyncio.sleep(1)
+    except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
-    finally:
-        host_connections.disconnect(event_id, websocket)
 
 
 @app.post("/api/host/{event_id}/start")
-def start_host_event(event_id: str, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Host link required")
-    token = authorization.removeprefix("Bearer ").strip()
+def start_host_event(event_id: str, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None), db: Session = Depends(get_db), user=Depends(optional_user)):
     event = db.get(Event, event_id)
-    if event is None or not secrets.compare_digest(token_hash(token), event.host_token_hash):
-        raise HTTPException(status_code=403, detail="Invalid host link")
+    authorize_host(event, authorization, user)
     if event.state != "lobby":
         raise HTTPException(status_code=409, detail="This quiz has already started")
 

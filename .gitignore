@@ -6,6 +6,9 @@ venv/
 LiveQuiz/
 node_modules/
 frontend/dist/
+.taste-skill/
 .env
 .DS_Store
 package-lock.json
+
+.packages/

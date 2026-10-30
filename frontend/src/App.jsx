@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, Check, Copy, Moon, Plus, Radio, Sparkles, Sun, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, Check, Copy, Moon, Plus, Radio, Sun, Users, X } from 'lucide-react';
 import { DEMO_CATEGORIES, createDemoQuizPayload } from './demoQuiz.js';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import Account from './Account';
+import { api, API_URL } from './api';
+// Retain the legacy key so saved theme preferences survive the rebrand.
 const THEME_KEY = 'quiz-aura-theme';
 const blankQuestion = () => ({ prompt: '', choices: ['', '', '', ''], correct_choice_index: 0, time_limit_seconds: 20 });
 
@@ -17,19 +19,6 @@ function getInitialTheme() {
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
   return theme;
-}
-
-async function api(path, options = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = typeof body.detail === 'string' ? body.detail : 'Please check the quiz details and try again.';
-    throw new Error(detail);
-  }
-  return body;
 }
 
 function useLocationState() {
@@ -84,8 +73,16 @@ function QuestionFeedback({ feedback }) {
 }
 
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [accountLoading, setAccountLoading] = useState(true);
+  useEffect(() => { api('/api/auth/users/me').then(setUser).catch(() => setUser(null)).finally(() => setAccountLoading(false)); }, []);
   const [theme, setTheme] = useState(getInitialTheme);
   const [location, setLocation] = useLocationState();
+  useEffect(() => {
+    const syncLocation = () => setLocation({ path: window.location.pathname, search: new URLSearchParams(window.location.search) });
+    window.addEventListener('popstate', syncLocation);
+    return () => window.removeEventListener('popstate', syncLocation);
+  }, []);
   const [view, setView] = useState('create');
   const [error, setError] = useState('');
   const [copiedValue, setCopiedValue] = useState('');
@@ -114,6 +111,7 @@ export default function App() {
   const hostToken = useMemo(() => window.location.hash.slice(1), [hostEventId, location.path]);
 
   async function createDemoQuiz(categoryId) {
+    if (!user) { navigate('/account/login'); return; }
     if (demoCreatingId) return;
     setDemoCreatingId(categoryId);
     setDemoError('');
@@ -182,7 +180,7 @@ export default function App() {
   }, [joinCode, hostEventId, hostToken]);
 
   useEffect(() => {
-    if (!hostEventId || !hostToken) return undefined;
+    if (!hostEventId) return undefined;
 
     let active = true;
     let refreshTimer;
@@ -244,6 +242,8 @@ export default function App() {
         if (!active) return;
         if (closeEvent.code === 4403) {
           setHostConnection('offline');
+          setHostInfo(null);
+          setError('Host access ended. Sign in as the quiz owner to continue.');
           return;
         }
         setHostConnection('reconnecting');
@@ -258,7 +258,7 @@ export default function App() {
       window.clearTimeout(retryTimer);
       socket?.close(1000, 'Host view closed');
     };
-  }, [hostEventId, hostToken]);
+  }, [hostEventId, hostToken, user]);
 
   useEffect(() => {
     if (!joinCode || !participant?.reconnect_token) return undefined;
@@ -280,6 +280,7 @@ export default function App() {
   function navigate(path) {
     window.history.pushState({}, '', path);
     setLocation({ path: window.location.pathname, search: new URLSearchParams(window.location.search) });
+    if (path === '/') setView('create');
     setError('');
   }
 
@@ -288,6 +289,7 @@ export default function App() {
   }
 
   async function createQuiz(eventForm) {
+    if (!user) { eventForm.preventDefault(); navigate('/account/login'); return; }
     eventForm.preventDefault();
     setBusy(true);
     setError('');
@@ -448,10 +450,10 @@ export default function App() {
   return (
     <main className="page-shell">
       <nav className="topbar">
-        <button className="brand" onClick={() => navigate('/')} aria-label="Quiz Aura home">
-          <span className="brand-mark"><Sparkles size={17} /></span><span>quiz<span className="brand-light">aura</span></span>
+        <button className="brand" onClick={() => navigate('/')} aria-label="QuizPop home">
+          <img className="brand-mark" src="/quizpop-mark.svg" width="48" height="48" alt="" /><span>Quiz<span className="brand-pop">Pop</span></span>
         </button>
-        <div className="topbar-tools">
+        <div className="topbar-tools"><button className="topbar-account" onClick={() => navigate(user ? "/account/profile" : "/account/login")} disabled={accountLoading}>{accountLoading ? "Loading…" : user ? "Account" : "Sign in"}</button>
           <button
             className="theme-toggle"
             type="button"
@@ -468,12 +470,13 @@ export default function App() {
       </nav>
 
       <section className="hero-wrap">
-        {view === 'create' && <>
-          <div className="eyebrow"><span className="eyebrow-line" />MAKE A MOMENT<span className="eyebrow-line" /></div>
-          <h1>Bring your<br /><span className="gradient-text">people together.</span></h1>
+        {location.path.startsWith("/account/") && <Account key={location.path} mode={location.path.split("/")[2]} user={user} onUser={setUser} navigate={navigate} />}
+        {!location.path.startsWith('/account/') && view === 'create' && <>
+          <div className="eyebrow"><span className="eyebrow-line" />GOOD QUESTIONS. GREAT COMPANY.<span className="eyebrow-line" /></div>
+          <h1>Make your<br /><span className="highlight-text">next quiz pop.</span></h1>
           <p className="hero-copy">A little friendly competition goes a long way.<br className="desktop-break" /> Build a quiz and let the room light up.</p>
           <section className="demo-section" aria-labelledby="demo-heading">
-            <div className="demo-heading"><div><span className="section-kicker">READY-MADE QUIZZES</span><h2 id="demo-heading">Try the host flow.</h2></div><span className="demo-total">{DEMO_CATEGORIES.length} QUIZZES</span></div>
+            <div className="demo-heading"><div><span className="section-kicker">READY-MADE QUIZZES</span><h2 id="demo-heading">Pick a quiz. Bring your people.</h2></div><span className="demo-total">{DEMO_CATEGORIES.length} QUIZZES</span></div>
             <p className="demo-intro">Choose a category to create a ready-to-host quiz. You’ll get a join link and your own host room.</p>
             <div className="demo-categories">{DEMO_CATEGORIES.map((category) => <article className="demo-category" key={category.name}>
               <span className="demo-category-number">{category.icon}</span><div><h3>{category.name}</h3><p>{category.detail}</p><span className="demo-category-count">{category.questions.length} questions · {category.timeLimitSeconds ?? 20} seconds each</span></div>
@@ -499,14 +502,14 @@ export default function App() {
             {error && <p className="error-message" role="alert">{error}</p>}
             <button className="primary-button full-button" disabled={busy}>{busy ? 'Joining…' : <>Join quiz <ArrowRight size={17} /></>}</button>
           </form>}
-          <div className="hero-stamp"><span>01</span><span className="stamp-rule" /> CREATE YOUR QUIZ</div>
+          <div className="hero-stamp">OR MAKE IT YOUR OWN</div>
           <form className="builder" onSubmit={createQuiz}>
-            <div className="builder-heading"><div><span className="section-kicker">THE SETUP</span><h2>Your quiz, your rules.</h2></div><span className="step-count">01 <i>/</i> 03</span></div>
+            <div className="builder-heading"><div><span className="section-kicker">THE SETUP</span><h2>Your quiz, your rules.</h2></div><span className="step-count">You’re the quizmaster.</span></div>
             <label className="field-label" htmlFor="quiz-title">QUIZ TITLE</label>
             <input id="quiz-title" className="text-input title-input" maxLength="100" placeholder="e.g. Friday night trivia" value={title} onChange={(e) => setTitle(e.target.value)} required />
             {questions.map((question, qi) => <article className="question-editor" key={qi}>
               <div className="question-editor-top"><span className="question-number">QUESTION {String(qi + 1).padStart(2, '0')}</span>{questions.length > 1 && <button type="button" className="icon-button" onClick={() => setQuestions((items) => items.filter((_, index) => index !== qi))} aria-label="Remove question"><X size={16} /></button>}</div>
-              <textarea className="text-input prompt-input" placeholder="Write your question..." maxLength="500" value={question.prompt} onChange={(e) => updateQuestion(qi, { prompt: e.target.value })} required />
+              <textarea className="text-input prompt-input" aria-label={`Question ${qi + 1} prompt`} placeholder="Write your question..." maxLength="500" value={question.prompt} onChange={(e) => updateQuestion(qi, { prompt: e.target.value })} required />
               <div className="choice-grid">{question.choices.map((choice, ci) => <label className={`choice-field ${question.correct_choice_index === ci ? 'correct' : ''}`} key={ci}>
                 <span className="choice-letter">{String.fromCharCode(65 + ci)}</span><input aria-label={`Answer ${String.fromCharCode(65 + ci)}`} maxLength="200" placeholder={`Answer ${String.fromCharCode(65 + ci)}`} value={choice} onChange={(e) => updateQuestion(qi, { choices: question.choices.map((value, index) => index === ci ? e.target.value : value) })} />
                 <button type="button" className="correct-toggle" aria-label={`Mark answer ${String.fromCharCode(65 + ci)} correct`} aria-pressed={question.correct_choice_index === ci} onClick={() => updateQuestion(qi, { correct_choice_index: ci })}>{question.correct_choice_index === ci && <Check size={13} />}</button>
@@ -518,20 +521,20 @@ export default function App() {
           </form>
         </>}
 
-        {view === 'created' && created && <div className="result-panel">
+        {!location.path.startsWith('/account/') && view === 'created' && created && <div className="result-panel">
           <div className="success-icon"><Check size={27} /></div><div className="eyebrow"><span className="eyebrow-line" />ROOM IS READY<span className="eyebrow-line" /></div>
-          <h1>Let the game<br /><span className="gradient-text">find its people.</span></h1>
+          <h1>Let the game<br /><span className="highlight-text">find its people.</span></h1>
           <p className="hero-copy">Your quiz <strong>{created.title}</strong> is waiting in the lobby.</p>
           <div className="share-card"><span className="section-kicker">PARTICIPANT LINK</span><div className="share-value"><span>{created.participant_url}</span><button className={`copy-button${copiedValue === created.participant_url ? ' copied' : ''}`} onClick={() => copy(created.participant_url)} aria-live="polite">{copiedValue === created.participant_url ? <Check size={15} /> : <Copy size={15} />} {copiedValue === created.participant_url ? 'Copied' : 'Copy'}</button></div><div className="join-code">JOIN CODE <strong>{created.join_code}</strong></div></div>
           <a className="primary-button host-button" href={created.host_url}>Open host lobby <ArrowRight size={17} /></a>
-          <p className="private-note">Keep your host link private. Anyone with it can control this quiz.</p>
+          <p className="private-note">Your host room is protected by your account. Sign in as the owner to control this quiz.</p>
         </div>}
 
-        {view === 'join' && <div className="join-wrap">
+        {!location.path.startsWith('/account/') && view === 'join' && <div className="join-wrap">
           <button className="back-link" onClick={() => navigate('/')}><ArrowLeft size={15} /> Create a quiz</button>
           {error && !event ? <div className="notice-card error-message" role="alert">{error}</div> : event && !participant ? <>
             <div className="eyebrow"><span className="eyebrow-line" />{event.state === 'lobby' ? 'YOU’RE INVITED' : 'TEST IN PROGRESS'}<span className="eyebrow-line" /></div>
-            <h1 className="join-title">{event.title}<br /><span className="gradient-text">{event.state === 'lobby' ? 'starts with you.' : 'join in.'}</span></h1>
+            <h1 className="join-title">{event.title}<br /><span className="highlight-text">{event.state === 'lobby' ? 'starts with you.' : 'join in.'}</span></h1>
             <div className="join-meta"><span><Users size={16} /> {event.participant_count} here</span><span className="meta-divider" /><span>ROOM {event.join_code}</span></div>
             <form className="join-card" onSubmit={joinQuiz}>
               <h2>{event.state === 'lobby' ? 'Save your seat.' : 'Join the test.'}</h2><p>Pick a name your friends will recognize.</p>
@@ -540,16 +543,15 @@ export default function App() {
               {error && <p className="error-message" role="alert">{error}</p>}
               <button className="primary-button full-button" disabled={busy}>{busy ? 'Joining…' : <>{event.state === 'lobby' ? 'Join the lobby' : 'Join the test'} <ArrowRight size={17} /></>}</button>
             </form>
-          </> : participant && event.state === 'lobby' && <div className="lobby-card"><span className="lobby-orbit"><Radio size={26} /></span><div className="eyebrow"><span className="eyebrow-line" />YOU’RE IN<span className="eyebrow-line" /></div><h1 className="lobby-title">Stay close,<br /><span className="gradient-text">{participant.display_name}.</span></h1><p className="hero-copy">You’re in the lobby for <strong>{event.title}</strong>.<br />The host will start the game soon.</p><div className="waiting-status"><span className="pulse-dot" /> WAITING FOR THE HOST</div><div className="lobby-instructions"><span className="section-kicker">WHILE YOU WAIT</span><ul><li>Choose carefully: you can’t change your answer after selecting it.</li><li>Answer before the timer runs out.</li><li>If you join during a question, you can answer the next one.</li><li>There’s a short pause between questions while results appear.</li></ul></div></div>}
-          {participant && event.state === 'completed' && <div className="final-results"><div className="eyebrow"><span className="eyebrow-line" />QUIZ COMPLETE<span className="eyebrow-line" /></div><h1 className="lobby-title">The final<br /><span className="gradient-text">leaderboard.</span></h1><p className="hero-copy">You finished at rank <strong>#{event.leaderboard_self?.rank ?? '—'}</strong> with <strong>{event.leaderboard_self?.points ?? 0} points.</strong></p><section className="final-ranking"><div className="final-ranking-heading"><span className="section-kicker">FINAL STANDINGS</span></div><FinalPodium entries={event.leaderboard || []} currentName={participant.display_name} /></section><section className="answer-review"><span className="section-kicker">YOUR ANSWERS</span><h2>Question review</h2>{(event.answer_review || []).map((item) => <article className={`review-row outcome-${item.outcome}`} key={item.position}><div className="review-heading"><span>QUESTION {String(item.position + 1).padStart(2, '0')}</span><strong>{item.outcome.toUpperCase()}</strong></div><h3>{item.prompt}</h3><p>Your answer: <strong>{item.selected_answer ?? 'No answer'}</strong></p><p>Correct answer: <strong>{item.correct_answer}</strong></p></article>)}</section></div>}
+          </> : participant && event.state === 'lobby' && <div className="lobby-card"><span className="lobby-orbit"><Radio size={26} /></span><div className="eyebrow"><span className="eyebrow-line" />YOU’RE IN<span className="eyebrow-line" /></div><h1 className="lobby-title">Stay close,<br /><span className="highlight-text">{participant.display_name}.</span></h1><p className="hero-copy">You’re in the lobby for <strong>{event.title}</strong>.<br />The host will start the game soon.</p><div className="waiting-status"><span className="pulse-dot" /> WAITING FOR THE HOST</div><div className="lobby-instructions"><span className="section-kicker">WHILE YOU WAIT</span><ul><li>Choose carefully: you can’t change your answer after selecting it.</li><li>Answer before the timer runs out.</li><li>If you join during a question, you can answer the next one.</li><li>There’s a short pause between questions while results appear.</li></ul></div></div>}
+          {participant && event.state === 'completed' && <div className="final-results"><div className="eyebrow"><span className="eyebrow-line" />QUIZ COMPLETE<span className="eyebrow-line" /></div><h1 className="lobby-title">The final<br /><span className="highlight-text">leaderboard.</span></h1><p className="hero-copy">You finished at rank <strong>#{event.leaderboard_self?.rank ?? '—'}</strong> with <strong>{event.leaderboard_self?.points ?? 0} points.</strong></p><section className="final-ranking"><div className="final-ranking-heading"><span className="section-kicker">FINAL STANDINGS</span></div><FinalPodium entries={event.leaderboard || []} currentName={participant.display_name} /></section><section className="answer-review"><span className="section-kicker">YOUR ANSWERS</span><h2>Question review</h2>{(event.answer_review || []).map((item) => <article className={`review-row outcome-${item.outcome}`} key={item.position}><div className="review-heading"><span>QUESTION {String(item.position + 1).padStart(2, '0')}</span><strong>{item.outcome.toUpperCase()}</strong></div><h3>{item.prompt}</h3><p>Your answer: <strong>{item.selected_answer ?? 'No answer'}</strong></p><p>Correct answer: <strong>{item.correct_answer}</strong></p></article>)}</section></div>}
           {participant && event.state === 'results' && activeQuestion && <div className="participant-live-layout"><div className="participant-test result-interval"><div className="eyebrow"><span className="eyebrow-line" />QUESTION RESULTS<span className="eyebrow-line" /></div><div className="test-progress">QUESTION {String(activeQuestion.position + 1).padStart(2, '0')} <span>OF {String(event.question_count).padStart(2, '0')}</span></div><h1 className="test-question">{activeQuestion.prompt}</h1><QuestionFeedback feedback={event.question_feedback} /><p className="answer-locked">Next question starts in {event.results_remaining_seconds} seconds.</p></div><aside className="participant-leaderboard"><span className="section-kicker">LIVE RANKING</span><h2>Your standing</h2><RankingList entries={event.leaderboard_top3 || []} currentName={participant.display_name} /><div className="your-rank"><span>Your rank</span><strong>#{event.leaderboard_self?.rank ?? '—'}</strong><span>{event.leaderboard_self?.points ?? 0} points</span></div></aside></div>}
           {participant && event.state === 'active' && activeQuestion && <div className="participant-test"><div className="eyebrow"><span className="eyebrow-line" />{event.title}<span className="eyebrow-line" /></div><div className="test-progress">QUESTION {String(activeQuestion.position + 1).padStart(2, '0')} <span>OF {String(event.question_count).padStart(2, '0')}</span></div><div className={`timer-display ${remainingSeconds <= 5 ? 'timer-urgent' : ''}`} aria-live="polite"><strong>{remainingSeconds}</strong><span>SECONDS REMAINING</span></div><div className="timer-track" role="progressbar" aria-label="Question time remaining" aria-valuemin="0" aria-valuemax={activeQuestion.time_limit_seconds} aria-valuenow={Math.min(remainingSeconds, activeQuestion.time_limit_seconds)}><span style={{ width: `${Math.min(100, Math.max(0, remainingSeconds / activeQuestion.time_limit_seconds * 100))}%` }} /></div><h1 className="test-question">{activeQuestion.prompt}</h1>{answeredChoice == null && remainingSeconds > 0 && event.can_answer_current_question && <p className="answer-hint">Choose carefully—your answer locks in when you select it.</p>}<div className="test-choices">{activeQuestion.choices.map((choice, index) => <button key={index} className={`test-choice ${answeredChoice === index ? 'selected' : ''}`} aria-pressed={answeredChoice === index} disabled={answeredChoice != null || remainingSeconds === 0 || answerSubmitting || !event.can_answer_current_question} onClick={() => submitAnswer(index)}><span>{String.fromCharCode(65 + index)}</span>{choice}</button>)}</div>{!event.can_answer_current_question && <p className="answer-locked">You joined during this question. You can answer the next one.</p>}{answeredChoice != null && <p className="answer-locked">Answer locked in. Standings update when the question ends.</p>}{remainingSeconds === 0 && <p className="answer-locked">Time is up. Showing the standings…</p>}{error && <p className="error-message" role="alert">{error}</p>}</div>}
         </div>}
 
-        {view === 'host' && <div className="host-wrap">
-          {hostRefreshError && <div className="notice-card error-message" role="alert">{hostRefreshError}</div>}
+        {!location.path.startsWith('/account/') && view === 'host' && <div className="host-wrap">
           {error && !hostInfo ? <div className="notice-card error-message" role="alert">{error}</div> : hostInfo && <>
-            <div className="eyebrow"><span className="eyebrow-line" />HOST CONTROL<span className="eyebrow-line" /></div><h1 className="host-title">{hostInfo.title}<br /><span className="gradient-text">{hostInfo.state === 'lobby' ? 'lobby.' : hostInfo.state === 'completed' ? 'complete.' : 'live.'}</span></h1>
+            <div className="eyebrow"><span className="eyebrow-line" />HOST CONTROL<span className="eyebrow-line" /></div><h1 className="host-title">{hostInfo.title}<br /><span className="highlight-text">{hostInfo.state === 'lobby' ? 'lobby.' : hostInfo.state === 'completed' ? 'complete.' : 'live.'}</span></h1>
             <div className="host-stats"><div className="stat-card"><span className="section-kicker">IN THE ROOM</span><strong>{String(hostInfo.participant_count).padStart(2, '0')}</strong><span className="stat-caption">of 50 players</span></div><div className="stat-card"><span className="section-kicker">JOIN CODE</span><strong className="stat-code">{hostInfo.join_code}</strong><button className={`copy-inline${copiedValue === hostInfo.join_code ? ' copied' : ''}`} onClick={() => copy(hostInfo.join_code)} aria-live="polite">{copiedValue === hostInfo.join_code ? <Check size={14} /> : <Copy size={14} />} {copiedValue === hostInfo.join_code ? 'Copied' : 'Copy code'}</button></div></div>
             <div className="players-card"><div className="players-heading"><div><span className="section-kicker">THE CROWD</span><h2>Players in the room</h2></div><div className="host-indicators"><span className="event-state-pill">{hostInfo.state.toUpperCase()}</span><span className={`live-pill connection-${hostConnection}`}><span className="status-dot" />{hostConnection === 'connected' ? 'LIVE' : hostConnection.toUpperCase()}</span></div></div>
               {hostInfo.state === 'lobby' ? (hostInfo.participants.length ? <div className="player-list">{hostInfo.participants.map((player, index) => <div className="player-row" key={`${player.display_name}-${index}`}><span className="player-avatar">{player.display_name.slice(0, 1).toUpperCase()}</span><span>{player.display_name}</span><span className="player-private">{player.name}</span></div>)}</div> : <div className="empty-players"><Users size={22} /><p>Share the join code and your players will appear here.</p></div>) : <><div className="host-live-summary">{hostInfo.state === 'completed' ? 'Final standings' : hostInfo.state === 'results' ? 'Question results' : `Question ${Number(hostInfo.current_question_position ?? 0) + 1} of ${hostInfo.question_count}`}</div><RankingList entries={hostInfo.leaderboard || []} showPoints /></>}
@@ -559,8 +561,8 @@ export default function App() {
           </>}
         </div>}
       </section>
-      {view === 'create' && <footer className="page-footer"><span>BUILT FOR THE MOMENT BETWEEN “I KNOW THIS” AND “WAIT, WHAT?”</span><ArrowDown size={15} /></footer>}
-      {view !== 'create' && <footer className="page-footer"><span>QUIZ AURA <i>·</i> GOOD QUESTIONS, BETTER COMPANY</span><span>POWERED BY CURIOSITY</span></footer>}
+      {!location.path.startsWith('/account/') && view === 'create' && <footer className="page-footer"><span>BUILT FOR THE MOMENT BETWEEN “I KNOW THIS” AND “WAIT, WHAT?”</span><ArrowDown size={15} /></footer>}
+      {view !== 'create' && <footer className="page-footer"><span>QUIZPOP <i>·</i> GOOD QUESTIONS, BETTER COMPANY</span><span>POWERED BY CURIOSITY</span></footer>}
     </main>
   );
 }
