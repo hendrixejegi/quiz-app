@@ -90,6 +90,7 @@ export default function App() {
   const [created, setCreated] = useState(null);
   const [event, setEvent] = useState(null);
   const [hostInfo, setHostInfo] = useState(null);
+  const [hostRefreshError, setHostRefreshError] = useState('');
   const [hostConnection, setHostConnection] = useState('connecting');
   const [participant, setParticipant] = useState(null);
   const [clockTick, setClockTick] = useState(Date.now());
@@ -172,9 +173,6 @@ export default function App() {
       }
     } else if (hostEventId) {
       setView('host');
-      api(`/api/host/${hostEventId}`, { headers: { Authorization: `Bearer ${hostToken}` } })
-        .then((data) => alive && setHostInfo(data))
-        .catch((reason) => alive && setError(reason.message));
     } else {
       setView('create');
     }
@@ -183,6 +181,36 @@ export default function App() {
 
   useEffect(() => {
     if (!hostEventId) return undefined;
+
+    let active = true;
+    let refreshTimer;
+    const refreshHostState = async () => {
+      try {
+        const data = await api(`/api/host/${hostEventId}`, {
+          headers: { Authorization: `Bearer ${hostToken}` },
+        });
+        if (!active) return;
+        setHostInfo(data);
+        setHostRefreshError('');
+        if (data.state !== 'completed') {
+          refreshTimer = window.setTimeout(refreshHostState, 1000);
+        }
+      } catch (reason) {
+        if (!active) return;
+        setHostRefreshError(reason.message);
+        refreshTimer = window.setTimeout(refreshHostState, 1000);
+      }
+    };
+
+    refreshHostState();
+    return () => {
+      active = false;
+      window.clearTimeout(refreshTimer);
+    };
+  }, [hostEventId, hostToken]);
+
+  useEffect(() => {
+    if (!hostEventId || !hostToken) return undefined;
 
     let active = true;
     let retryTimer;
@@ -203,6 +231,7 @@ export default function App() {
         }
         if (message.type === 'host_lobby') {
           setHostInfo(message.data);
+          setHostRefreshError('');
           setHostConnection('connected');
         } else if (message.type === 'error') {
           setError(message.detail);
