@@ -14,6 +14,7 @@ class Event(Base):
     __tablename__ = "events"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(100), nullable=False)
     join_code: Mapped[str] = mapped_column(String(8), unique=True, index=True, nullable=False)
     host_token_hash: Mapped[str] = mapped_column(String(64), nullable=False)

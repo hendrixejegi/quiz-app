@@ -85,7 +85,7 @@ h2 { font-size: 25px; letter-spacing: -.7px; line-height: 1.2; }
 :where(.primary-button, .secondary-button, .copy-button, .copy-inline):hover:not(:disabled) { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--ink); }
 :where(.primary-button, .secondary-button, .copy-button, .copy-inline):active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
 .primary-button:disabled { opacity: .6; box-shadow: none; }
-.add-question, .refresh-button, .back-link { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 6px 0; border: 0; background: transparent; color: var(--text); font: 600 14px var(--font); }
+.add-question, .refresh-button, .back-link, .topbar-account { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 6px 0; border: 0; background: transparent; color: var(--text); font: 600 14px var(--font); }
 .add-question span { font: 12px var(--mono); color: var(--muted); }
 .add-question:disabled { opacity: .5; }
 .error-message { color: var(--negative); font-size: 13px; line-height: 1.6; margin: 16px 0 0; }
@@ -126,6 +126,7 @@ h2 { font-size: 25px; letter-spacing: -.7px; line-height: 1.2; }
 .host-button { margin-top: 4px; }
 .private-note { font: 12px/1.7 var(--mono); color: var(--muted); margin-top: 20px; }
 .back-link { display: flex; margin: 0 0 32px; }
+.topbar-account { flex: none; align-self: center; margin: 0; white-space: nowrap; }
 .hero-wrap .join-title, .hero-wrap .host-title, .hero-wrap .lobby-title { font-size: clamp(38px,5.4vw,64px); letter-spacing: -.05em; overflow-wrap: anywhere; }
 .join-meta { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 14px; color: var(--muted); font: 12px var(--mono); margin: 24px 0; }
 .join-meta span:first-child { display: flex; align-items: center; gap: 6px; }
@@ -297,3 +298,22 @@ h2 { font-size: 25px; letter-spacing: -.7px; line-height: 1.2; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }
+
+/* Account screens keep the QuizPop palette and use a quiet, readable form. */
+.account-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: start; font-family: var(--font); padding: 24px 0; }
+.account-context { background: var(--inset); padding: 32px; border-radius: 8px; }
+.account-context h2 { margin-top: 0; font-size: 28px; }
+.account-context p { font-size: 16px; line-height: 1.6; }
+.account-panel { min-width: 0; }
+.hero-wrap .account-panel h1 { font-size: 32px; letter-spacing: -.03em; margin: 0 0 24px; }
+.account-panel form { display: grid; gap: 20px; }
+.account-panel label { display: grid; gap: 8px; font-size: 16px; }
+.account-panel small { color: var(--muted); font-size: 14px; }
+.account-panel .primary-button { background: var(--text); color: var(--surface); box-shadow: none; border-color: var(--text); }
+.account-panel > .secondary-button { margin-top: 20px; box-shadow: none; }
+.account-links { display: flex; gap: 12px 20px; flex-wrap: wrap; margin-top: 24px; }
+.account-links a { color: var(--text); min-height: 44px; display: inline-flex; align-items: center; }
+.account-message { padding: 16px; background: var(--positive-bg); color: var(--positive); line-height: 1.6; }
+@media(max-width: 700px) { .account-layout { grid-template-columns: 1fr; gap: 24px; padding-top: 0; } .account-context { padding: 20px; } .account-context h2 { font-size: 24px; } .topbar-tools { gap: 10px; } .topbar-note { display: none; } }
+@media(max-width: 700px) { .hero-wrap .account-panel h1 { font-size: 24px; } }
+@media(max-width: 700px) { .account-panel { grid-row: 1; } }

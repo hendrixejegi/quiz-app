@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowLeft, ArrowRight, Check, Copy, Moon, Plus, Radio, Sun, Users, X } from 'lucide-react';
 import { DEMO_CATEGORIES, createDemoQuizPayload } from './demoQuiz.js';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import Account from './Account';
+import { api, API_URL } from './api';
 // Retain the legacy key so saved theme preferences survive the rebrand.
 const THEME_KEY = 'quiz-aura-theme';
 const blankQuestion = () => ({ prompt: '', choices: ['', '', '', ''], correct_choice_index: 0, time_limit_seconds: 20 });
@@ -18,19 +19,6 @@ function getInitialTheme() {
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
   return theme;
-}
-
-async function api(path, options = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = typeof body.detail === 'string' ? body.detail : 'Please check the quiz details and try again.';
-    throw new Error(detail);
-  }
-  return body;
 }
 
 function useLocationState() {
@@ -85,8 +73,16 @@ function QuestionFeedback({ feedback }) {
 }
 
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [accountLoading, setAccountLoading] = useState(true);
+  useEffect(() => { api('/api/auth/users/me').then(setUser).catch(() => setUser(null)).finally(() => setAccountLoading(false)); }, []);
   const [theme, setTheme] = useState(getInitialTheme);
   const [location, setLocation] = useLocationState();
+  useEffect(() => {
+    const syncLocation = () => setLocation({ path: window.location.pathname, search: new URLSearchParams(window.location.search) });
+    window.addEventListener('popstate', syncLocation);
+    return () => window.removeEventListener('popstate', syncLocation);
+  }, []);
   const [view, setView] = useState('create');
   const [error, setError] = useState('');
   const [copiedValue, setCopiedValue] = useState('');
@@ -114,6 +110,7 @@ export default function App() {
   const hostToken = useMemo(() => window.location.hash.slice(1), [hostEventId, location.path]);
 
   async function createDemoQuiz(categoryId) {
+    if (!user) { navigate('/account/login'); return; }
     if (demoCreatingId) return;
     setDemoCreatingId(categoryId);
     setDemoError('');
@@ -185,7 +182,7 @@ export default function App() {
   }, [joinCode, hostEventId, hostToken]);
 
   useEffect(() => {
-    if (!hostEventId || !hostToken) return undefined;
+    if (!hostEventId) return undefined;
 
     let active = true;
     let retryTimer;
@@ -216,6 +213,8 @@ export default function App() {
         if (!active) return;
         if (closeEvent.code === 4403) {
           setHostConnection('offline');
+          setHostInfo(null);
+          setError('Host access ended. Sign in as the quiz owner to continue.');
           return;
         }
         setHostConnection('reconnecting');
@@ -230,7 +229,7 @@ export default function App() {
       window.clearTimeout(retryTimer);
       socket?.close(1000, 'Host view closed');
     };
-  }, [hostEventId, hostToken]);
+  }, [hostEventId, hostToken, user]);
 
   useEffect(() => {
     if (!joinCode || !participant?.reconnect_token) return undefined;
@@ -261,6 +260,7 @@ export default function App() {
   }
 
   async function createQuiz(eventForm) {
+    if (!user) { eventForm.preventDefault(); navigate('/account/login'); return; }
     eventForm.preventDefault();
     setBusy(true);
     setError('');
@@ -424,7 +424,7 @@ export default function App() {
         <button className="brand" onClick={() => navigate('/')} aria-label="QuizPop home">
           <img className="brand-mark" src="/quizpop-mark.svg" width="48" height="48" alt="" /><span>Quiz<span className="brand-pop">Pop</span></span>
         </button>
-        <div className="topbar-tools">
+        <div className="topbar-tools"><button className="topbar-account" onClick={() => navigate(user ? "/account/profile" : "/account/login")} disabled={accountLoading}>{accountLoading ? "Loading…" : user ? "Account" : "Sign in"}</button>
           <button
             className="theme-toggle"
             type="button"
@@ -441,7 +441,8 @@ export default function App() {
       </nav>
 
       <section className="hero-wrap">
-        {view === 'create' && <>
+        {location.path.startsWith("/account/") && <Account key={location.path} mode={location.path.split("/")[2]} user={user} onUser={setUser} navigate={navigate} />}
+        {!location.path.startsWith('/account/') && view === 'create' && <>
           <div className="eyebrow"><span className="eyebrow-line" />GOOD QUESTIONS. GREAT COMPANY.<span className="eyebrow-line" /></div>
           <h1>Make your<br /><span className="highlight-text">next quiz pop.</span></h1>
           <p className="hero-copy">A little friendly competition goes a long way.<br className="desktop-break" /> Build a quiz and let the room light up.</p>
@@ -491,16 +492,16 @@ export default function App() {
           </form>
         </>}
 
-        {view === 'created' && created && <div className="result-panel">
+        {!location.path.startsWith('/account/') && view === 'created' && created && <div className="result-panel">
           <div className="success-icon"><Check size={27} /></div><div className="eyebrow"><span className="eyebrow-line" />ROOM IS READY<span className="eyebrow-line" /></div>
           <h1>Let the game<br /><span className="highlight-text">find its people.</span></h1>
           <p className="hero-copy">Your quiz <strong>{created.title}</strong> is waiting in the lobby.</p>
           <div className="share-card"><span className="section-kicker">PARTICIPANT LINK</span><div className="share-value"><span>{created.participant_url}</span><button className={`copy-button${copiedValue === created.participant_url ? ' copied' : ''}`} onClick={() => copy(created.participant_url)} aria-live="polite">{copiedValue === created.participant_url ? <Check size={15} /> : <Copy size={15} />} {copiedValue === created.participant_url ? 'Copied' : 'Copy'}</button></div><div className="join-code">JOIN CODE <strong>{created.join_code}</strong></div></div>
           <a className="primary-button host-button" href={created.host_url}>Open host lobby <ArrowRight size={17} /></a>
-          <p className="private-note">Keep your host link private. Anyone with it can control this quiz.</p>
+          <p className="private-note">Your host room is protected by your account. Sign in as the owner to control this quiz.</p>
         </div>}
 
-        {view === 'join' && <div className="join-wrap">
+        {!location.path.startsWith('/account/') && view === 'join' && <div className="join-wrap">
           <button className="back-link" onClick={() => navigate('/')}><ArrowLeft size={15} /> Create a quiz</button>
           {error && !event ? <div className="notice-card error-message" role="alert">{error}</div> : event && !participant ? <>
             <div className="eyebrow"><span className="eyebrow-line" />{event.state === 'lobby' ? 'YOU’RE INVITED' : 'TEST IN PROGRESS'}<span className="eyebrow-line" /></div>
@@ -519,7 +520,7 @@ export default function App() {
           {participant && event.state === 'active' && activeQuestion && <div className="participant-test"><div className="eyebrow"><span className="eyebrow-line" />{event.title}<span className="eyebrow-line" /></div><div className="test-progress">QUESTION {String(activeQuestion.position + 1).padStart(2, '0')} <span>OF {String(event.question_count).padStart(2, '0')}</span></div><div className={`timer-display ${remainingSeconds <= 5 ? 'timer-urgent' : ''}`} aria-live="polite"><strong>{remainingSeconds}</strong><span>SECONDS REMAINING</span></div><div className="timer-track" role="progressbar" aria-label="Question time remaining" aria-valuemin="0" aria-valuemax={activeQuestion.time_limit_seconds} aria-valuenow={Math.min(remainingSeconds, activeQuestion.time_limit_seconds)}><span style={{ width: `${Math.min(100, Math.max(0, remainingSeconds / activeQuestion.time_limit_seconds * 100))}%` }} /></div><h1 className="test-question">{activeQuestion.prompt}</h1>{answeredChoice == null && remainingSeconds > 0 && event.can_answer_current_question && <p className="answer-hint">Choose carefully—your answer locks in when you select it.</p>}<div className="test-choices">{activeQuestion.choices.map((choice, index) => <button key={index} className={`test-choice ${answeredChoice === index ? 'selected' : ''}`} aria-pressed={answeredChoice === index} disabled={answeredChoice != null || remainingSeconds === 0 || answerSubmitting || !event.can_answer_current_question} onClick={() => submitAnswer(index)}><span>{String.fromCharCode(65 + index)}</span>{choice}</button>)}</div>{!event.can_answer_current_question && <p className="answer-locked">You joined during this question. You can answer the next one.</p>}{answeredChoice != null && <p className="answer-locked">Answer locked in. Standings update when the question ends.</p>}{remainingSeconds === 0 && <p className="answer-locked">Time is up. Showing the standings…</p>}{error && <p className="error-message" role="alert">{error}</p>}</div>}
         </div>}
 
-        {view === 'host' && <div className="host-wrap">
+        {!location.path.startsWith('/account/') && view === 'host' && <div className="host-wrap">
           {error && !hostInfo ? <div className="notice-card error-message" role="alert">{error}</div> : hostInfo && <>
             <div className="eyebrow"><span className="eyebrow-line" />HOST CONTROL<span className="eyebrow-line" /></div><h1 className="host-title">{hostInfo.title}<br /><span className="highlight-text">{hostInfo.state === 'lobby' ? 'lobby.' : hostInfo.state === 'completed' ? 'complete.' : 'live.'}</span></h1>
             <div className="host-stats"><div className="stat-card"><span className="section-kicker">IN THE ROOM</span><strong>{String(hostInfo.participant_count).padStart(2, '0')}</strong><span className="stat-caption">of 50 players</span></div><div className="stat-card"><span className="section-kicker">JOIN CODE</span><strong className="stat-code">{hostInfo.join_code}</strong><button className={`copy-inline${copiedValue === hostInfo.join_code ? ' copied' : ''}`} onClick={() => copy(hostInfo.join_code)} aria-live="polite">{copiedValue === hostInfo.join_code ? <Check size={14} /> : <Copy size={14} />} {copiedValue === hostInfo.join_code ? 'Copied' : 'Copy code'}</button></div></div>
@@ -531,7 +532,7 @@ export default function App() {
           </>}
         </div>}
       </section>
-      {view === 'create' && <footer className="page-footer"><span>BUILT FOR THE MOMENT BETWEEN “I KNOW THIS” AND “WAIT, WHAT?”</span><ArrowDown size={15} /></footer>}
+      {!location.path.startsWith('/account/') && view === 'create' && <footer className="page-footer"><span>BUILT FOR THE MOMENT BETWEEN “I KNOW THIS” AND “WAIT, WHAT?”</span><ArrowDown size={15} /></footer>}
       {view !== 'create' && <footer className="page-footer"><span>QUIZPOP <i>·</i> GOOD QUESTIONS, BETTER COMPANY</span><span>POWERED BY CURIOSITY</span></footer>}
     </main>
   );
