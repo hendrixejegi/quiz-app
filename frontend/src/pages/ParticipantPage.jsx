@@ -41,6 +41,14 @@ function ParticipantRoom({ joinCode }) {
         <div className="notice-card error-message" role="alert">
           {error}
         </div>
+      ) : event?.state === 'closed' ? (
+        <section className="notice-card terminal-card">
+          <h1>Event closed</h1>
+          <p>
+            {event.title} has closed. Participant results and answer review are
+            no longer available.
+          </p>
+        </section>
       ) : event && !participant ? (
         <>
           <div className="eyebrow">

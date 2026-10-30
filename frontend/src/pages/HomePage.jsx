@@ -11,8 +11,17 @@ import QuizBuilder from '../components/quiz/QuizBuilder';
 import CreationConfirmation from '../components/quiz/CreationConfirmation';
 import JoinByCodeForm from '../components/quiz/JoinByCodeForm';
 export default function HomePage() {
-  const { key } = useLocation();
-  return <HomeScreen key={key} />;
+  const { key, state } = useLocation();
+  return (
+    <>
+      {state?.notice && (
+        <p role="status" className="account-message">
+          {state.notice}
+        </p>
+      )}
+      <HomeScreen key={key} />
+    </>
+  );
 }
 function HomeScreen() {
   const draft = useQuizDraft();

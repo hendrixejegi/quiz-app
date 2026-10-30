@@ -83,7 +83,7 @@ Host WebSockets re-read state and authorization once per second. The timer worke
 
 The frontend demo quiz has automated checks for its question banks, category shuffling, and correct-answer association. Add backend coverage for quiz validation, display-name conflicts, host authorization, and the complete timed game flow as those milestones are implemented.
 
-Run the backend tests from `backend/` with `python -m pytest tests -q`, using the disposable database configuration below. Participant submission tests cover persisted scores, duplicate and invalid answers, expired questions, answer-key reveal timing, and reconnects. Leaderboard and timer tests additionally cover tied ranks and automatic movement through the results intervals. Two existing leaderboard/timer assertions currently fail: results-interval eligibility and SQLite timezone comparison; these remain separate behavior fixes.
+Run the backend tests from `backend/` with `python -m pytest tests -q`, using the disposable database configuration below. Participant submission tests cover persisted scores, duplicate and invalid answers, expired questions, answer-key reveal timing, and reconnects. Leaderboard and timer tests additionally cover tied ranks and automatic movement through the results intervals. Eligibility uses the exact question start in active and results states; SQLite timestamps are compared as UTC instants.
 
 ## Account setup and validation
 
@@ -160,3 +160,22 @@ Routes are `/`, `/join/:joinCode`, `/host/:eventId`, and `/account/login`, `/acc
 Host hooks fetch an initial snapshot, use authenticated WebSocket updates (including empty handshakes for account-owned rooms), and fall back to one-second polling with reconnect attempts. Authorization failure clears protected data and stops retries. Participant hooks retain the existing sessionStorage reconnect keys and restore server-saved answers. Leaving a room aborts outstanding requests, closes its socket, and clears timers. The API helper exposes HTTP status through `ApiError.status` and passes action cancellation through CSRF preparation and the final request.
 
 Use `npm ci` from `frontend/` for a reproducible dependency installation; the frontend lockfile includes React Router. For browser validation, use an isolated backend/database and check draft preservation across sign-in, account forms and theme changes, legacy URLs, host/guest play, reload reconnect, final review, and logout/revocation. Check light/dark layouts at 390, 768, and 1440 pixels. No backend migration is required for this frontend refactor.
+
+
+### Event closure and deletion
+
+The lifecycle is lobby → active/results → completed → closed → permanently deleted. Only completed events can be closed; there is no early cancellation or reopening. Hosts keep their records after closure, while participants lose standings and answer review. Closed/deleted rooms clear participant reconnect tokens and stop polling.
+
+- `POST /api/host/{event_id}/close`: completed → closed, returns the host snapshot. Repeating closure is safe.
+- `DELETE /api/host/{event_id}`: closed events only, returns 204. Permanently removes answers, participants, choices, questions and the event.
+
+Both require existing host authorization and CSRF protection. Invalid lifecycle states return 409, missing events 404. PostgreSQL row locks serialize start, timer advancement, closure and deletion. No migration is needed for the string-valued closed state.
+
+Run all checks with `python -m pytest tests -q` against the disposable SQLite configuration above, then `npm test` and `npm run build` from frontend. Optional PostgreSQL concurrency checks require a separate disposable database with `test` in its name (never the configured product database):
+
+```powershell
+$env:TEST_POSTGRES_URL='postgresql+psycopg://USER:PASSWORD@localhost/quizpop_test'
+python -m pytest tests/test_event_concurrency.py -q
+```
+
+These checks create and drop a unique test schema. Without this variable, PostgreSQL checks are skipped; SQLite checks still run.

@@ -324,3 +324,10 @@ h2 { font-size: 25px; letter-spacing: -.7px; line-height: 1.2; }
 .back-link { width: fit-content; }
 
 .account-field { display: grid; gap: 8px; font-size: 16px; }
+
+.lifecycle-panel { margin-top: 24px; padding-top: 24px; border-top: 1px solid currentColor; }
+.lifecycle-panel p { line-height: 1.6; margin: 12px 0 20px; }
+.lifecycle-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.lifecycle-actions button { min-height: 44px; }
+.terminal-card h1 { font-size: 30px; letter-spacing: -0.03em; margin: 0 0 16px; }
+.terminal-card p { line-height: 1.6; }

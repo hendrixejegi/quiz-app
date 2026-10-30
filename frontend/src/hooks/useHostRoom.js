@@ -39,7 +39,34 @@ export function useHostRoom(eventId, token, user, loading) {
         })),
     );
   }
+  function close(onSuccess) {
+    task.run(
+      (signal) =>
+        api(`/api/host/${encodeURIComponent(eventId)}/close`, {
+          method: 'POST',
+          signal,
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        }),
+      (data) => {
+        setSnapshot((current) => ({ ...current, data }));
+        onSuccess();
+      },
+    );
+  }
+  function remove(onSuccess) {
+    task.run(
+      (signal) =>
+        api(`/api/host/${encodeURIComponent(eventId)}`, {
+          method: 'DELETE',
+          signal,
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        }),
+      onSuccess,
+    );
+  }
   return {
+    close,
+    remove,
     ...snapshot,
     error: snapshot.error || task.error,
     busy: task.busy,

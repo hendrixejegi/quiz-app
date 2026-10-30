@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import Request, Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -25,14 +25,16 @@ RESULTS_INTERVAL_SECONDS = 5
 async def lifespan(_: FastAPI):
     # Older versions could persist an active state but had no timer fields.
     with SessionLocal() as db:
-        legacy_active_events = db.scalars(select(Event).where(
+        legacy_active_events = db.scalars(select(Event.id).where(
             Event.state == "active",
             Event.current_question_position.is_(None),
         )).all()
-        for event in legacy_active_events:
+        for event_id in legacy_active_events:
+            event = locked_event(db, event_id)
+            if event is None or event.state != "active" or event.current_question_position is not None:
+                continue
             event.current_question_position = 0
             event.timer_deadline = datetime.now(timezone.utc) + timedelta(seconds=event.questions[0].time_limit_seconds)
-        if legacy_active_events:
             db.commit()
     timer_task = asyncio.create_task(timer_worker())
     yield
@@ -142,9 +144,20 @@ def question_payload(question: Question) -> dict:
     }
 
 
+def question_started_at(event: Event, question: Question) -> datetime:
+    pause = RESULTS_INTERVAL_SECONDS if event.state == "results" else 0
+    return utc_datetime(event.timer_deadline) - timedelta(seconds=question.time_limit_seconds + pause)
+
+
+def locked_event(db: Session, event_id: str) -> Event | None:
+    # Never flush a stale timer object's state before acquiring the row lock.
+    with db.no_autoflush:
+        return db.scalar(select(Event).where(Event.id == event_id).with_for_update()
+                         .execution_options(populate_existing=True))
+
+
 def can_answer_question(event: Event, participant: Participant, question: Question) -> bool:
-    question_started_at = utc_datetime(event.timer_deadline) - timedelta(seconds=question.time_limit_seconds)
-    return utc_datetime(participant.joined_at) <= question_started_at
+    return utc_datetime(participant.joined_at) <= question_started_at(event, question)
 
 
 def leaderboard_payload(db: Session, event: Event, before_question: Question | None = None) -> list[dict]:
@@ -155,11 +168,7 @@ def leaderboard_payload(db: Session, event: Event, before_question: Question | N
         .where(Question.event_id == event.id)
     )
     if before_question is not None:
-        question_started_at = (
-            utc_datetime(event.timer_deadline)
-            - timedelta(seconds=RESULTS_INTERVAL_SECONDS + before_question.time_limit_seconds)
-        )
-        participants = [p for p in participants if utc_datetime(p.joined_at) <= question_started_at]
+        participants = [p for p in participants if utc_datetime(p.joined_at) <= question_started_at(event, before_question)]
         answer_query = answer_query.where(Question.position < before_question.position)
     answers = db.execute(answer_query).all()
     questions = {question.id: question for question in event.questions}
@@ -167,7 +176,7 @@ def leaderboard_payload(db: Session, event: Event, before_question: Question | N
     for participant_id, question_id, choice_index in answers:
         if questions[question_id].correct_choice_index == choice_index:
             totals[participant_id] += POINTS_PER_CORRECT_ANSWER
-    participants.sort(key=lambda participant: (-totals[participant.id], participant.joined_at, participant.id))
+    participants.sort(key=lambda participant: (-totals[participant.id], utc_datetime(participant.joined_at), participant.id))
     ranking = []
     previous_points = None
     rank = 0
@@ -229,9 +238,10 @@ def participant_review(db: Session, event: Event, participant: Participant) -> l
 
 
 def advance_expired_event(db: Session, event: Event, now: datetime | None = None) -> bool:
-    if event.state not in {"active", "results"} or event.timer_deadline is None:
+    event = locked_event(db, event.id)
+    if event is None or event.state not in {"active", "results"} or event.timer_deadline is None:
         return False
-    now = now or datetime.now(timezone.utc)
+    now = utc_datetime(now or datetime.now(timezone.utc))
     changed = False
     while event.state in {"active", "results"} and event.timer_deadline is not None and utc_datetime(event.timer_deadline) <= now:
         expired_deadline = utc_datetime(event.timer_deadline)
@@ -257,9 +267,12 @@ def advance_expired_event(db: Session, event: Event, now: datetime | None = None
 async def timer_worker():
     while True:
         with SessionLocal() as db:
-            events = db.scalars(select(Event).where(Event.state.in_(["active", "results"]))).all()
-            for event in events:
-                advance_expired_event(db, event)
+            ids = db.scalars(select(Event.id).where(Event.state.in_(["active", "results"]))).all()
+        for event_id in ids:
+            with SessionLocal() as db:
+                event = locked_event(db, event_id)
+                if event is not None:
+                    advance_expired_event(db, event)
         await asyncio.sleep(0.2)
 
 
@@ -336,6 +349,8 @@ def create_quiz(payload: QuizCreate, db: Session = Depends(get_db), user=Depends
 @app.get("/api/events/{join_code}")
 def get_public_event(join_code: str, db: Session = Depends(get_db)):
     event = lookup_event(db, join_code)
+    if event.state == "closed":
+        return {"title": event.title, "join_code": event.join_code, "state": "closed"}
     participant_count = db.scalar(
         select(func.count()).select_from(Participant).where(Participant.event_id == event.id)
     ) or 0
@@ -406,6 +421,8 @@ def get_participant_event_state(
         "state": event.state,
         "participant_display_name": participant.display_name,
     }
+    if event.state == "closed":
+        return {key: result[key] for key in ("title", "join_code", "state")}
     ranking = None
     if event.state in {"results", "completed"}:
         ranking = leaderboard_payload(db, event)
@@ -517,7 +534,7 @@ async def host_lobby_updates(websocket: WebSocket, event_id: str):
 
 @app.post("/api/host/{event_id}/start")
 def start_host_event(event_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db), user=Depends(optional_user)):
-    event = db.get(Event, event_id)
+    event = locked_event(db, event_id)
     authorize_host(event, authorization, user)
     if event.state != "lobby":
         raise HTTPException(status_code=409, detail="This quiz has already started")
@@ -527,3 +544,31 @@ def start_host_event(event_id: str, authorization: str | None = Header(default=N
     event.timer_deadline = datetime.now(timezone.utc) + timedelta(seconds=event.questions[0].time_limit_seconds)
     db.commit()
     return {"state": event.state}
+
+
+@app.post("/api/host/{event_id}/close")
+def close_host_event(event_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db), user=Depends(optional_user)):
+    event = locked_event(db, event_id)
+    authorize_host(event, authorization, user)
+    if event.state not in {"completed", "closed"}:
+        raise HTTPException(409, "Complete the quiz before closing it")
+    if event.state == "completed":
+        event.state = "closed"
+        db.flush()
+    result = host_lobby_payload(db, event)
+    db.commit()
+    return result
+
+
+@app.delete("/api/host/{event_id}", status_code=204)
+def delete_host_event(event_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db), user=Depends(optional_user)):
+    event = locked_event(db, event_id)
+    authorize_host(event, authorization, user)
+    if event.state != "closed":
+        raise HTTPException(409, "Close the event before deleting it")
+    db.execute(delete(ParticipantAnswer).where(
+        (ParticipantAnswer.question_id.in_(select(Question.id).where(Question.event_id == event.id))) |
+        (ParticipantAnswer.participant_id.in_(select(Participant.id).where(Participant.event_id == event.id)))
+    ))
+    db.delete(event)
+    db.commit()

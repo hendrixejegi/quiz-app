@@ -1,5 +1,6 @@
+import { useState, useRef, useEffect } from 'react';
 import { ArrowRight, Users } from 'lucide-react';
-import { useLocation, useParams } from 'react-router';
+import { useLocation, useParams, useNavigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { useHostRoom } from '../hooks/useHostRoom';
 import RankingList from '../components/game/RankingList';
@@ -19,7 +20,16 @@ export default function HostPage() {
   );
 }
 function HostRoom({ eventId, token, user, loading }) {
+  const navigate = useNavigate();
+  const [confirmation, setConfirmation] = useState(false);
+  const actionRef = useRef(null);
+  const cancelRef = useRef(null);
+  useEffect(() => {
+    if (confirmation) cancelRef.current?.focus();
+  }, [confirmation]);
   const {
+    close,
+    remove,
     data: hostInfo,
     error,
     connection: hostConnection,
@@ -47,8 +57,10 @@ function HostRoom({ eventId, token, user, loading }) {
               <span className="highlight-text">
                 {hostInfo.state === 'lobby'
                   ? 'lobby.'
-                  : hostInfo.state === 'completed'
-                    ? 'complete.'
+                  : ['completed', 'closed'].includes(hostInfo.state)
+                    ? hostInfo.state === 'closed'
+                      ? 'closed.'
+                      : 'complete.'
                     : 'live.'}
               </span>
             </h1>
@@ -116,7 +128,7 @@ function HostRoom({ eventId, token, user, loading }) {
               ) : (
                 <>
                   <div className="host-live-summary">
-                    {hostInfo.state === 'completed'
+                    {['completed', 'closed'].includes(hostInfo.state)
                       ? 'Final standings'
                       : hostInfo.state === 'results'
                         ? 'Question results'
@@ -144,10 +156,85 @@ function HostRoom({ eventId, token, user, loading }) {
                 </button>
               ) : (
                 <p className="quiz-started">
-                  {hostInfo.state === 'completed'
-                    ? 'Quiz complete.'
+                  {['completed', 'closed'].includes(hostInfo.state)
+                    ? hostInfo.state === 'closed'
+                      ? 'Event closed. Host records retained.'
+                      : 'Quiz complete.'
                     : 'Standings update live as answers come in.'}
                 </p>
+              )}
+              {['completed', 'closed'].includes(hostInfo.state) && (
+                <section
+                  className="lifecycle-panel"
+                  aria-label="Event lifecycle"
+                >
+                  {!confirmation ? (
+                    <button
+                      ref={actionRef}
+                      className="secondary-button"
+                      disabled={busy}
+                      onClick={() => setConfirmation(true)}
+                    >
+                      {hostInfo.state === 'closed'
+                        ? 'Delete event'
+                        : 'Close event'}
+                    </button>
+                  ) : (
+                    <div
+                      role="group"
+                      aria-labelledby="lifecycle-heading"
+                      aria-busy={busy}
+                    >
+                      <h3 id="lifecycle-heading">
+                        {hostInfo.state === 'closed'
+                          ? `Delete “${hostInfo.title}”?`
+                          : 'Close this event?'}
+                      </h3>
+                      <p>
+                        {hostInfo.state === 'closed'
+                          ? 'Permanently remove this quiz, questions, choices, participants, answers, and results. This cannot be undone.'
+                          : 'Participant results and answer review will become unavailable. Your host records and final standings remain available.'}
+                      </p>
+                      <div className="lifecycle-actions">
+                        <button
+                          ref={cancelRef}
+                          className="secondary-button"
+                          disabled={busy}
+                          onClick={() => {
+                            setConfirmation(false);
+                            requestAnimationFrame(() =>
+                              actionRef.current?.focus(),
+                            );
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className="primary-button"
+                          disabled={busy}
+                          onClick={() =>
+                            hostInfo.state === 'closed'
+                              ? remove(() =>
+                                  navigate('/', {
+                                    replace: true,
+                                    state: {
+                                      notice: 'Event permanently deleted.',
+                                    },
+                                  }),
+                                )
+                              : close(() => setConfirmation(false))
+                          }
+                        >
+                          {busy
+                            ? 'Please wait…'
+                            : hostInfo.state === 'closed'
+                              ? 'Permanently delete event'
+                              : 'Confirm close'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </section>
               )}
               {error && (
                 <p className="error-message" role="alert">
@@ -156,7 +243,9 @@ function HostRoom({ eventId, token, user, loading }) {
               )}
             </div>
             <p className="private-note">
-              New participants appear here as they join.
+              {hostInfo.state === 'closed'
+                ? 'Participant access has ended. Only the host can read these records.'
+                : 'New participants appear here as they join.'}
             </p>
           </>
         )

@@ -203,3 +203,8 @@ Each stage needs a usable end-to-end flow and passing relevant checks before dep
 - [FastAPI Users features and maintenance status](https://github.com/fastapi-users/fastapi-users)
 - [Authentication transports and strategies](https://fastapi-users.github.io/fastapi-users/latest/configuration/authentication/)
 - [Cookie transport](https://fastapi-users.github.io/fastapi-users/latest/configuration/authentication/transports/cookie/)
+
+
+### Implemented event lifecycle
+
+Completed events can be closed by their authorized host, then permanently deleted. Active games cannot be closed. Closure is idempotent and retains host standings while hiding all participant results/review and blocking joining/submissions. Deletion requires closure and removes answers, participants, choices, questions and the event atomically. No reopening or soft deletion is supported. Start, advancement and lifecycle mutations use PostgreSQL row locks; the five-second results interval preserves question-start eligibility. See README for endpoints and isolated validation commands.
