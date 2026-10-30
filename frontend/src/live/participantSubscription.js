@@ -15,14 +15,32 @@ export function subscribeParticipant({
   const emit = (value) => {
     if (active) onChange(value);
   };
+  function terminal(event, error = '') {
+    if (!active) return;
+    storage.removeItem(key);
+    token = null;
+    emit({
+      event: event
+        ? { title: event.title, join_code: event.join_code, state: 'closed' }
+        : null,
+      participant: null,
+      error,
+      loading: false,
+    });
+  }
   async function publicRoom() {
     try {
       const event = await request(
         `/api/events/${encodeURIComponent(joinCode)}`,
         { signal: lifetime.signal },
       );
-      emit({ event, participant: null, error: '', loading: false });
+      if (event.state === 'closed') terminal(event);
+      else emit({ event, participant: null, error: '', loading: false });
     } catch (reason) {
+      if (reason.status === 404) {
+        terminal(null, 'This event is unavailable.');
+        return;
+      }
       if (!lifetime.signal.aborted)
         emit({
           event: null,
@@ -46,6 +64,10 @@ export function subscribeParticipant({
           signal: lifetime.signal,
         },
       );
+      if (event.state === 'closed') {
+        terminal(event);
+        return;
+      }
       emit({
         event: { ...event, received_at: now() },
         participant: {
@@ -63,8 +85,11 @@ export function subscribeParticipant({
         await publicRoom();
         return;
       }
+      if (reason.status === 404) {
+        terminal(null, 'This event is unavailable.');
+        return;
+      }
       emit({ error: reason.message, loading: false });
-      if (reason.status === 404) return;
     }
     if (active && token) timer = schedule(refresh, 1000);
   }

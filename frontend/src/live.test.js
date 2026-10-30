@@ -292,3 +292,40 @@ test('host fallback never overlaps a pending initial request or leaves duplicate
   stop();
   assert.equal(timer.jobs.size, 0);
 });
+
+for (const terminalState of ['closed', 'deleted']) {
+  test(`participant ${terminalState} clears cached private data and reconnect token, then stops`, async () => {
+    const timer = clock(),
+      store = storage('token'),
+      updates = [];
+    let calls = 0;
+    const stop = subscribeParticipant({
+      joinCode: 'ROOM',
+      storage: store,
+      ...timer,
+      request: async () => {
+        calls++;
+        if (calls === 1)
+          return {
+            state: 'completed',
+            leaderboard: [{ points: 100 }],
+            answer_review: ['private'],
+          };
+        if (terminalState === 'deleted')
+          throw Object.assign(Error('Missing'), { status: 404 });
+        return { title: 'Quiz', join_code: 'ROOM', state: 'closed' };
+      },
+      onChange: (value) => updates.push(value),
+    });
+    await flush();
+    await timer.run(1000);
+    await flush();
+    const result = updates.at(-1);
+    assert.equal(result.participant, null);
+    assert.equal(result.event?.leaderboard, undefined);
+    assert.equal(result.event?.answer_review, undefined);
+    assert.equal(store.getItem('quiz:ROOM:reconnect'), null);
+    assert.equal(timer.jobs.size, 0);
+    stop();
+  });
+}

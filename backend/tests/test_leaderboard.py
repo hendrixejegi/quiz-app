@@ -15,6 +15,7 @@ from app.main import (
     participant_review,
     question_results_feedback,
     token_hash,
+    utc_datetime,
 )
 from app.models import Choice, Event, Participant, ParticipantAnswer, Question
 
@@ -162,20 +163,57 @@ class LeaderboardTests(unittest.TestCase):
         self.assertNotIn("question_feedback", final_state)
 
     def test_question_results_interval_and_automatic_finish(self):
-        first_deadline = self.event.timer_deadline
+        self.db.commit()
+        first_deadline = utc_datetime(self.event.timer_deadline)
 
         self.assertTrue(advance_expired_event(self.db, self.event, first_deadline))
         self.assertEqual(self.event.state, "results")
-        self.assertEqual(self.event.timer_deadline, first_deadline + timedelta(seconds=RESULTS_INTERVAL_SECONDS))
+        self.assertEqual(utc_datetime(self.event.timer_deadline), first_deadline + timedelta(seconds=RESULTS_INTERVAL_SECONDS))
 
         second_question_deadline = self.event.timer_deadline + timedelta(seconds=self.q2.time_limit_seconds)
         self.assertTrue(advance_expired_event(self.db, self.event, second_question_deadline))
         self.assertEqual(self.event.state, "results")
+        self.assertEqual(utc_datetime(self.event.timer_deadline), utc_datetime(second_question_deadline) + timedelta(seconds=5))
 
         self.assertTrue(advance_expired_event(
             self.db, self.event, second_question_deadline + timedelta(seconds=RESULTS_INTERVAL_SECONDS)
         ))
         self.assertEqual(self.event.state, "completed")
+
+    def test_question_start_microsecond_boundaries_in_active_and_results(self):
+        for state in ("active", "results"):
+            self.event.state = state
+            self.event.timer_deadline = self.now + timedelta(seconds=20 + (5 if state == "results" else 0))
+            for offset, expected in ((-1, True), (0, True), (1, False)):
+                self.p3.joined_at = self.now + timedelta(microseconds=offset)
+                self.assertEqual(can_answer_question(self.event, self.p3, self.q1), expected)
+
+    def test_delayed_advancement_preserves_exact_deadlines_and_finishes(self):
+        self.db.commit()
+        first = utc_datetime(self.event.timer_deadline)
+        # SQLite returns naive values; injected naive UTC must mean the same instant.
+        advance_expired_event(self.db, self.event, (first + timedelta(seconds=5)).replace(tzinfo=None))
+        self.assertEqual(self.event.state, "active")
+        self.assertEqual(self.event.current_question_position, 1)
+        self.assertEqual(utc_datetime(self.event.timer_deadline), first + timedelta(seconds=15))
+        self.assertEqual((utc_datetime(self.event.timer_deadline) - first).total_seconds(), 15)
+        advance_expired_event(self.db, self.event, first + timedelta(minutes=10))
+        self.assertEqual(self.event.state, "completed")
+        self.assertIsNone(self.event.timer_deadline)
+
+    def test_stale_timer_cannot_overwrite_closed_or_recreate_deleted_event(self):
+        self.db.commit()
+        with Session(self.engine) as other:
+            row = other.get(Event, self.event.id)
+            row.state = "closed"
+            other.commit()
+        self.assertFalse(advance_expired_event(self.db, self.event, self.now + timedelta(hours=1)))
+        self.assertEqual(self.event.state, "closed")
+        with Session(self.engine) as other:
+            other.delete(other.get(Event, self.event.id)); other.commit()
+        self.assertFalse(advance_expired_event(self.db, self.event, self.now + timedelta(hours=1)))
+        with Session(self.engine) as other:
+            self.assertIsNone(other.get(Event, "event-1"))
 
 
 if __name__ == "__main__":
