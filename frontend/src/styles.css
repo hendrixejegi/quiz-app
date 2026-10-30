@@ -276,7 +276,7 @@ h2 { font-size: 25px; letter-spacing: -.7px; line-height: 1.2; }
   .question-editor { padding: 14px; }
   .builder-actions { align-items: stretch; flex-direction: column; }
   .primary-button { width: 100%; }
-  .page-footer { font-size: 10px; align-items: flex-start; }
+  .page-footer { font-size: 11px; align-items: flex-start; }
   .page-footer>span { min-width: 0; }
   .page-footer svg { flex: none; }
   .share-card { padding: 20px; }
@@ -317,3 +317,10 @@ h2 { font-size: 25px; letter-spacing: -.7px; line-height: 1.2; }
 @media(max-width: 700px) { .account-layout { grid-template-columns: 1fr; gap: 24px; padding-top: 0; } .account-context { padding: 20px; } .account-context h2 { font-size: 24px; } .topbar-tools { gap: 10px; } .topbar-note { display: none; } }
 @media(max-width: 700px) { .hero-wrap .account-panel h1 { font-size: 24px; } }
 @media(max-width: 700px) { .account-panel { grid-row: 1; } }
+
+/* Router links retain the presentation of their former button controls. */
+.brand, .topbar-account, .back-link { text-decoration: none; }
+
+.back-link { width: fit-content; }
+
+.account-field { display: grid; gap: 8px; font-size: 16px; }

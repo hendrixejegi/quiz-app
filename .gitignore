@@ -7,8 +7,11 @@ LiveQuiz/
 node_modules/
 frontend/dist/
 .taste-skill/
+.codex-finalizer/
+.presentation-build/
 .env
 .DS_Store
 package-lock.json
 
 .packages/
+!frontend/package-lock.json

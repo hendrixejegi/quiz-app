@@ -1,17 +1,34 @@
-import { createBrowserRouter, useLocation } from 'react-router';
-import App from './App.jsx';
-import AppLayout from './layouts/AppLayout.jsx';
-import { LoginPage, NotFoundPage, RootErrorPage, RouteErrorPage } from './pages/RoutePages.jsx';
-import { createAppRoutes } from './routes.js';
-
-function QuizPage() {
-  const location = useLocation();
-  // Changing rooms or credentials must dispose the old socket, polling, and UI
-  // state. Session-scoped reconnect credentials remain in sessionStorage.
-  return <App key={location.key} />;
-}
-
-// Create one router outside React renders, ready for future auth loaders/actions.
-export const router = createBrowserRouter(createAppRoutes({
-  Layout: AppLayout, QuizPage, LoginPage, NotFoundPage, RouteErrorPage, RootErrorPage,
-}));
+import { createBrowserRouter } from 'react-router';
+import AppLayout from './layouts/AppLayout';
+import HomePage from './pages/HomePage';
+import HostPage from './pages/HostPage';
+import ParticipantPage from './pages/ParticipantPage';
+import LoginPage from './pages/account/LoginPage';
+import RegisterPage from './pages/account/RegisterPage';
+import ForgotPasswordPage from './pages/account/ForgotPasswordPage';
+import ResetPasswordPage from './pages/account/ResetPasswordPage';
+import VerifyEmailPage from './pages/account/VerifyEmailPage';
+import ProfilePage from './pages/account/ProfilePage';
+import {
+  NotFoundPage,
+  RootErrorPage,
+  RouteErrorPage,
+} from './pages/RoutePages';
+import { createAppRoutes } from './routes';
+export const router = createBrowserRouter(
+  createAppRoutes({
+    Layout: AppLayout,
+    HomePage,
+    HostPage,
+    ParticipantPage,
+    LoginPage,
+    RegisterPage,
+    ForgotPasswordPage,
+    ResetPasswordPage,
+    VerifyEmailPage,
+    ProfilePage,
+    NotFoundPage,
+    RootErrorPage,
+    RouteErrorPage,
+  }),
+);
