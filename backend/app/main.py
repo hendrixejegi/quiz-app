@@ -6,7 +6,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Request, BackgroundTasks, Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import Request, Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -116,31 +116,6 @@ def authorize_host(event, authorization, user):
     elif not authorization or not authorization.startswith("Bearer ") or not secrets.compare_digest(token_hash(authorization[7:].strip()), event.host_token_hash):
         raise HTTPException(403, "Invalid legacy host link")
 
-
-
-class HostConnectionManager:
-    def __init__(self):
-        self.connections: dict[str, set[WebSocket]] = {}
-
-    async def connect(self, event_id: str, websocket: WebSocket):
-        self.connections.setdefault(event_id, set()).add(websocket)
-
-    def disconnect(self, event_id: str, websocket: WebSocket):
-        connections = self.connections.get(event_id)
-        if connections:
-            connections.discard(websocket)
-            if not connections:
-                self.connections.pop(event_id, None)
-
-    async def publish(self, event_id: str, payload: dict):
-        for websocket in list(self.connections.get(event_id, set())):
-            try:
-                await websocket.send_json(payload)
-            except (WebSocketDisconnect, RuntimeError, OSError):
-                self.disconnect(event_id, websocket)
-
-
-host_connections = HostConnectionManager()
 
 
 def token_hash(token: str) -> str:
@@ -284,8 +259,7 @@ async def timer_worker():
         with SessionLocal() as db:
             events = db.scalars(select(Event).where(Event.state.in_(["active", "results"]))).all()
             for event in events:
-                if advance_expired_event(db, event):
-                    await host_connections.publish(event.id, {"type": "host_lobby", "data": host_lobby_payload(db, event)})
+                advance_expired_event(db, event)
         await asyncio.sleep(0.2)
 
 
@@ -378,7 +352,6 @@ def get_public_event(join_code: str, db: Session = Depends(get_db)):
 def join_event(
     join_code: str,
     payload: ParticipantJoin,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     event = lookup_event(db, join_code)
@@ -410,11 +383,6 @@ def join_event(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="That display name is already taken") from None
-    background_tasks.add_task(
-        host_connections.publish,
-        event.id,
-        {"type": "host_lobby", "data": host_lobby_payload(db, event)},
-    )
     return {
         "participant_id": participant.id,
         "display_name": participant.display_name,
@@ -479,7 +447,6 @@ def get_participant_event_state(
 def submit_participant_answer(
     join_code: str,
     payload: AnswerSubmit,
-    background_tasks: BackgroundTasks,
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
@@ -514,11 +481,6 @@ def submit_participant_answer(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Your answer is already locked") from None
-    background_tasks.add_task(
-        host_connections.publish,
-        event.id,
-        {"type": "host_lobby", "data": host_lobby_payload(db, event)},
-    )
     return {"state": "accepted", "choice_index": answer.choice_index}
 
 
@@ -554,7 +516,7 @@ async def host_lobby_updates(websocket: WebSocket, event_id: str):
 
 
 @app.post("/api/host/{event_id}/start")
-def start_host_event(event_id: str, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None), db: Session = Depends(get_db), user=Depends(optional_user)):
+def start_host_event(event_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db), user=Depends(optional_user)):
     event = db.get(Event, event_id)
     authorize_host(event, authorization, user)
     if event.state != "lobby":
@@ -564,9 +526,4 @@ def start_host_event(event_id: str, background_tasks: BackgroundTasks, authoriza
     event.current_question_position = 0
     event.timer_deadline = datetime.now(timezone.utc) + timedelta(seconds=event.questions[0].time_limit_seconds)
     db.commit()
-    background_tasks.add_task(
-        host_connections.publish,
-        event.id,
-        {"type": "host_lobby", "data": host_lobby_payload(db, event)},
-    )
     return {"state": event.state}

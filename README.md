@@ -40,7 +40,7 @@ python -m alembic upgrade head
 python -m uvicorn app.main:app --reload --env-file .env --loop app.runtime:create_event_loop --port 8107
 ```
 
-The API is at `http://localhost:8000`; interactive API documentation is at `/docs`. With `DATABASE_URL` unset, the migration creates `backend/quiz.db` for local development. To use PostgreSQL, uncomment and set `DATABASE_URL` in `backend/.env`, for example `postgresql+psycopg://quiz:quiz@localhost:5432/quiz`. `FRONTEND_ORIGINS` is a comma-separated list of allowed browser origins.
+The command above starts the API at `http://localhost:8107`; interactive API documentation is at `/docs`. Set `API_PROXY_TARGET=http://127.0.0.1:8107` in `frontend/.env` to match that port. With `DATABASE_URL` unset, the migration creates `backend/quiz.db` for local development. To use PostgreSQL, uncomment and set `DATABASE_URL` in `backend/.env`, for example `postgresql+psycopg://quiz:quiz@localhost:5432/quiz`. `FRONTEND_ORIGINS` is a comma-separated list of allowed browser origins.
 
 Start the frontend in another terminal:
 
@@ -76,7 +76,7 @@ Host WebSockets re-read state and authorization once per second. The timer worke
 
 The frontend demo quiz has automated checks for its question banks, category shuffling, and correct-answer association. Add backend coverage for quiz validation, display-name conflicts, host authorization, and the complete timed game flow as those milestones are implemented.
 
-Run the backend leaderboard and timer tests from `backend/` with `python -m unittest discover -s tests -v`. They cover fixed scoring, tied ranks, final answer review, and automatic movement through the results intervals.
+Run the backend tests from `backend/` with `python -m pytest tests -q`, using the disposable database configuration below. Participant submission tests cover persisted scores, duplicate and invalid answers, expired questions, answer-key reveal timing, and reconnects. Leaderboard and timer tests additionally cover tied ranks and automatic movement through the results intervals. Two existing leaderboard/timer assertions currently fail: results-interval eligibility and SQLite timezone comparison; these remain separate behavior fixes.
 
 ## Account setup and validation
 
@@ -98,7 +98,7 @@ pip install -r requirements-dev.txt
 python -m pytest tests/test_auth.py tests/test_auth_migration.py -q
 ```
 
-Do not point these tests at a real database: account rows are cleared by the fixture. `tests/test_scoring.py` is an existing obsolete suite referencing removed API symbols and needs updating before full-suite discovery passes. Frontend checks: `npm test` and `npm run build` from `frontend/`.
+Do not point these tests at a real database: account rows are cleared by the fixture. `tests/test_participant_answers.py` uses its own in-memory database. Frontend checks: `npm test` and `npm run build` from `frontend/`. The React Router files and their tests are retained for future routing work; the current frontend entry point still mounts `App` directly.
 
 Before production: configure and exercise real Google/SMTP flows, run migration against a PostgreSQL staging copy, verify HTTPS cookie/proxy and WebSocket routing, and add shared rate limiting/abuse controls and monitoring. Organisation memberships, group permissions, and a platform-admin portal are separate planned features; authentication does not yet create those domain models.
 
@@ -140,3 +140,5 @@ python -m pytest tests/test_auth_migration.py -q
 ```
 
 On Windows, use `--loop app.runtime:create_event_loop` when starting Uvicorn, including without reload. Psycopg async PostgreSQL connections require a Selector event loop; the default Proactor loop fails when an account route first accesses the database.
+
+The canonical presentation deck is `presentation-output/live-quiz-demo.pptx`. The PDF and architecture guide remain reference documents. Generated presentation intermediates are excluded from version control.

@@ -98,8 +98,6 @@ export default function App() {
   const [answerSubmitting, setAnswerSubmitting] = useState(false);
   const [joinMenuOpen, setJoinMenuOpen] = useState(false);
   const [participantJoinForm, setParticipantJoinForm] = useState({ join_code: '', name: '', display_name: '' });
-  const [questionIndex, setQuestionIndex] = useState(0);
-  const [answers, setAnswers] = useState({});
   const [joinForm, setJoinForm] = useState({ name: '', display_name: '' });
   const [title, setTitle] = useState('');
   const [questions, setQuestions] = useState([blankQuestion()]);
@@ -148,19 +146,10 @@ export default function App() {
             display_name: data.participant_display_name,
             reconnect_token: reconnectToken,
           });
-          try {
-            const progress = JSON.parse(sessionStorage.getItem(`quiz:${joinCode}:progress`) || '{}');
-            setQuestionIndex(Number.isInteger(progress.questionIndex) ? progress.questionIndex : 0);
-            setAnswers(progress.answers && typeof progress.answers === 'object' ? progress.answers : {});
-          } catch {
-            setQuestionIndex(0);
-            setAnswers({});
-          }
         }).catch((reason) => {
           if (!alive) return;
           if (reason.message === 'Invalid participant link') {
             sessionStorage.removeItem(`quiz:${joinCode}:reconnect`);
-            sessionStorage.removeItem(`quiz:${joinCode}:progress`);
           }
           api(`/api/events/${encodeURIComponent(joinCode)}`)
             .then((data) => alive && setEvent(data))
@@ -323,7 +312,6 @@ export default function App() {
         method: 'POST', body: JSON.stringify(joinForm),
       });
       sessionStorage.setItem(`quiz:${joinCode}:reconnect`, result.reconnect_token);
-      sessionStorage.setItem(`quiz:${joinCode}:progress`, JSON.stringify({ questionIndex: 0, answers: {} }));
       setParticipant(result);
       setOptimisticAnswer(null);
     } catch (reason) {
@@ -345,13 +333,10 @@ export default function App() {
         body: JSON.stringify({ name: participantJoinForm.name, display_name: participantJoinForm.display_name }),
       });
       sessionStorage.setItem(`quiz:${code}:reconnect`, result.reconnect_token);
-      sessionStorage.setItem(`quiz:${code}:progress`, JSON.stringify({ questionIndex: 0, answers: {} }));
       window.history.pushState({}, '', `/?join=${encodeURIComponent(code)}`);
       setLocation({ path: window.location.pathname, search: new URLSearchParams(window.location.search) });
       setEvent(eventInfo);
       setParticipant(result);
-      setQuestionIndex(0);
-      setAnswers({});
       setJoinMenuOpen(false);
       setView('join');
     } catch (reason) {
@@ -359,14 +344,6 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }
-
-  function saveProgress(nextQuestionIndex, nextAnswers) {
-    if (!joinCode) return;
-    sessionStorage.setItem(`quiz:${joinCode}:progress`, JSON.stringify({
-      questionIndex: nextQuestionIndex,
-      answers: nextAnswers,
-    }));
   }
 
   async function copy(value) {
