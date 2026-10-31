@@ -53,3 +53,29 @@ def test_new_revision_can_upgrade_existing_and_fresh_databases(tmp_path):
     env['DATABASE_URL'] = f"sqlite:///{(tmp_path / 'fresh.db').as_posix()}"
     run('upgrade', 'head')
     run('check')
+
+
+def test_library_upgrade_keeps_existing_game_content_and_answers(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'library-upgrade.db').as_posix()}"
+    backend = Path(__file__).resolve().parents[1]
+    env = {**os.environ, 'DATABASE_URL': url, 'AUTH_SECRET':'migration-test-only'}
+    def upgrade(target):
+        result = subprocess.run([sys.executable, '-m', 'alembic', 'upgrade', target], cwd=backend, env=env, capture_output=True, text=True, timeout=40)
+        assert result.returncode == 0, result.stderr
+    upgrade('0001_auth')
+    engine = create_engine(url)
+    with engine.begin() as db:
+        db.execute(text("INSERT INTO events (id,title,join_code,host_token_hash,state,created_at) VALUES ('legacy','Original','LEGACY','hash','completed',CURRENT_TIMESTAMP)"))
+        db.execute(text("INSERT INTO questions (id,event_id,position,prompt,time_limit_seconds,correct_choice_index) VALUES (1,'legacy',0,'Original?',10,0)"))
+        db.execute(text("INSERT INTO choices (question_id,position,text) VALUES (1,0,'Yes'),(1,1,'No')"))
+        db.execute(text("INSERT INTO participants (id,event_id,private_name,display_name,reconnect_token_hash,joined_at) VALUES ('p','legacy','Name','Player','hash',CURRENT_TIMESTAMP)"))
+        db.execute(text("INSERT INTO participant_answers (participant_id,question_id,choice_index,submitted_at) VALUES ('p',1,0,CURRENT_TIMESTAMP)"))
+    upgrade('head')
+    with engine.connect() as db:
+        assert db.execute(text('SELECT title, source_version_id FROM events')).one() == ('Original',None)
+        assert db.execute(text('SELECT prompt FROM questions')).scalar() == 'Original?'
+        assert db.execute(text('SELECT count(*) FROM choices')).scalar() == 2
+        assert db.execute(text('SELECT choice_index FROM participant_answers')).scalar() == 0
+        assert db.execute(text('SELECT count(*) FROM library_quizzes')).scalar() == 0
+        assert db.execute(text('SELECT count(*) FROM quiz_versions')).scalar() == 0
+    engine.dispose()

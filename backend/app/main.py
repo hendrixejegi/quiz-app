@@ -13,9 +13,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .database import SessionLocal, get_db
-from .models import Choice, Event, Participant, ParticipantAnswer, Question
+from .models import Choice, Event, Participant, ParticipantAnswer, Question, utc_datetime
 from .schemas import AnswerSubmit, ParticipantJoin, QuizCreate
 from .auth import router as auth_router, current_user, optional_user, websocket_user
+from .library import router as library_router
+from .event_service import build_event, event_created_payload
 
 POINTS_PER_CORRECT_ANSWER = 100
 RESULTS_INTERVAL_SECONDS = 5
@@ -51,11 +53,12 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=frontend_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"],
 )
 
 app.include_router(auth_router)
+app.include_router(library_router)
 
 @app.middleware("http")
 async def csrf_protection(request: Request, call_next):
@@ -129,10 +132,6 @@ def lookup_event(db: Session, join_code: str) -> Event:
     if event is None:
         raise HTTPException(status_code=404, detail="Quiz not found")
     return event
-
-
-def utc_datetime(value: datetime) -> datetime:
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 def question_payload(question: Question) -> dict:
@@ -324,32 +323,10 @@ def health():
 
 @app.post("/api/quizzes", status_code=status.HTTP_201_CREATED)
 def create_quiz(payload: QuizCreate, db: Session = Depends(get_db), user=Depends(current_user)):
-    host_token = secrets.token_urlsafe(32)
-    event = Event(
-        id=str(uuid.uuid4()),
-        title=payload.title,
-        owner_id=str(user.id),
-        join_code=secrets.token_urlsafe(5).replace("-", "").replace("_", "").upper()[:7],
-        host_token_hash=token_hash(host_token),
-    )
-    for question_position, question_input in enumerate(payload.questions):
-        question = Question(
-            position=question_position,
-            prompt=question_input.prompt,
-            time_limit_seconds=question_input.time_limit_seconds,
-            correct_choice_index=question_input.correct_choice_index,
-        )
-        question.choices = [Choice(position=i, text=text) for i, text in enumerate(question_input.choices)]
-        event.questions.append(question)
+    event = build_event(payload, user.id)
     db.add(event)
     db.commit()
-    return {
-        "event_id": event.id,
-        "title": event.title,
-        "join_code": event.join_code,
-        "participant_url": f"/?join={event.join_code}",
-        "host_url": f"/host/{event.id}",
-    }
+    return event_created_payload(event)
 
 
 @app.get("/api/events/{join_code}")

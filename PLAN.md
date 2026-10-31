@@ -4,7 +4,7 @@
 
 Evolve QuizPop into a product for learning, teaching, and playing quizzes with friends. Retain live games for up to 50 participants while adding collaborative question setting, reusable quiz libraries, independent study, AI-assisted creation, and organisation learning records. The first education release targets adults, university learners, independent study, and workplace training.
 
-The live quiz foundation and QuizPop visual identity already exist. Account authentication and account-owned hosting are implemented in this checkout. Organisations, reusable libraries, AI, assignments, and cross-game analytics below remain planned work.
+The live quiz foundation and QuizPop visual identity already exist. Account authentication and account-owned hosting are implemented in this checkout. The personal quiz library now supports persistent drafts, immutable published versions, and reusable hosting. Organisations, subjects/topics, AI, assignments, and cross-game analytics below remain planned work.
 
 ## Product scope
 
@@ -208,3 +208,8 @@ Each stage needs a usable end-to-end flow and passing relevant checks before dep
 ### Implemented event lifecycle
 
 Completed events can be closed by their authorized host, then permanently deleted. Active games cannot be closed. Closure is idempotent and retains host standings while hiding all participant results/review and blocking joining/submissions. Deletion requires closure and removes answers, participants, choices, questions and the event atomically. No reopening or soft deletion is supported. Start, advancement and lifecycle mutations use PostgreSQL row locks; the five-second results interval preserves question-start eligibility. See README for endpoints and isolated validation commands.
+
+
+### Implemented personal library slice
+
+Verified users have an owner-only library, explicit incomplete-draft saving, revision conflict protection, atomic save-and-publish, immutable numbered history, read-only answer previews and reusable version-specific hosting. Publication is private and separate from hosting. Existing home/demo quick launch and legacy events remain separate; no historical content is automatically imported. Events snapshot published content and retain a nullable source-version reference, so edits and event deletion cannot rewrite/delete library versions. Migration `0002_quiz_library` is required; see README for endpoints and migration/test commands. Library deletion, classification, organisation scope, practice, assignments, analytics and AI remain deferred.

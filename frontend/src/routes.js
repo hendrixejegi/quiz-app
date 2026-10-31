@@ -12,6 +12,10 @@ export function createAppRoutes({
   HomePage,
   HostPage,
   ParticipantPage,
+  LibraryPage,
+  LibraryEditorPage,
+  LibraryQuizPage,
+  LibraryVersionPage,
   LoginPage,
   RegisterPage,
   ForgotPasswordPage,
@@ -44,6 +48,17 @@ export function createAppRoutes({
           ErrorBoundary: RouteErrorPage,
         },
         { path: 'login', loader: legacyLoginLoader },
+        ...[
+          ['library', LibraryPage],
+          ['library/new', LibraryEditorPage],
+          ['library/:quizId/edit', LibraryEditorPage],
+          ['library/:quizId/versions/:versionNumber', LibraryVersionPage],
+          ['library/:quizId', LibraryQuizPage],
+        ].map(([path, Component]) => ({
+          path,
+          Component,
+          ErrorBoundary: RouteErrorPage,
+        })),
         ...[
           ['login', LoginPage],
           ['register', RegisterPage],
