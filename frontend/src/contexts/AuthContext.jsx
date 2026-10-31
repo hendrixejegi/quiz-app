@@ -9,6 +9,7 @@ import {
 import { api } from '../api';
 
 const AuthContext = createContext(null);
+const ACCOUNT_CHANGE_KEY = 'quizpop:account-change';
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -38,6 +39,12 @@ export function AuthProvider({ children }) {
   }, []);
   useEffect(() => {
     refreshUser();
+    // Session cookies are shared across tabs. Recheck identity and unmount
+    // private editors when another tab signs in or out; never store user data.
+    const syncAccount = (event) => {
+      if (event.key === ACCOUNT_CHANGE_KEY) refreshUser();
+    };
+    window.addEventListener('storage', syncAccount);
     const controller = new AbortController();
     api('/api/auth/config', { signal: controller.signal })
       .then((config) => {
@@ -45,6 +52,7 @@ export function AuthProvider({ children }) {
       })
       .catch(() => {});
     return () => {
+      window.removeEventListener('storage', syncAccount);
       request.current?.abort();
       controller.abort();
     };
@@ -54,6 +62,16 @@ export function AuthProvider({ children }) {
     setUser(account);
     setLoading(false);
     setError('');
+    if (user?.id !== account?.id) {
+      try {
+        localStorage.setItem(
+          ACCOUNT_CHANGE_KEY,
+          `${Date.now()}:${Math.random()}`,
+        );
+      } catch {
+        // Authentication still works if browser storage is unavailable.
+      }
+    }
   }
   async function signOut(all, signal) {
     await api(all ? '/api/auth/revoke-sessions' : '/api/auth/session/logout', {

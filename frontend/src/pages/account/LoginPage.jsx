@@ -1,5 +1,6 @@
 import { useNavigate, useSearchParams } from 'react-router';
 import { api } from '../../api';
+import { libraryReturnPath } from '../../library';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAsyncTask } from '../../hooks/useAsyncTask';
 import AccountFrame from '../../components/account/AccountFrame';
@@ -30,7 +31,7 @@ export default function LoginPage() {
       },
       (user) => {
         setUser(user);
-        navigate('/');
+        navigate(libraryReturnPath(params.get('next')));
       },
     );
   }

@@ -3,6 +3,10 @@ import AppLayout from './layouts/AppLayout';
 import HomePage from './pages/HomePage';
 import HostPage from './pages/HostPage';
 import ParticipantPage from './pages/ParticipantPage';
+import LibraryPage from './pages/library/LibraryPage';
+import LibraryEditorPage from './pages/library/LibraryEditorPage';
+import LibraryQuizPage from './pages/library/LibraryQuizPage';
+import LibraryVersionPage from './pages/library/LibraryVersionPage';
 import LoginPage from './pages/account/LoginPage';
 import RegisterPage from './pages/account/RegisterPage';
 import ForgotPasswordPage from './pages/account/ForgotPasswordPage';
@@ -21,6 +25,10 @@ export const router = createBrowserRouter(
     HomePage,
     HostPage,
     ParticipantPage,
+    LibraryPage,
+    LibraryEditorPage,
+    LibraryQuizPage,
+    LibraryVersionPage,
     LoginPage,
     RegisterPage,
     ForgotPasswordPage,

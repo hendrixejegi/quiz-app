@@ -8,6 +8,10 @@ const screens = Object.fromEntries(
     'HomePage',
     'HostPage',
     'ParticipantPage',
+    'LibraryPage',
+    'LibraryEditorPage',
+    'LibraryQuizPage',
+    'LibraryVersionPage',
     'LoginPage',
     'RegisterPage',
     'ForgotPasswordPage',
@@ -42,6 +46,15 @@ function waitForLocation(router, pathname) {
 test('mounted route table covers home, live rooms and every account screen', () => {
   for (const [url, name, params] of [
     ['/', 'HomePage', {}],
+    ['/library', 'LibraryPage', {}],
+    ['/library/new', 'LibraryEditorPage', {}],
+    ['/library/quiz-1/edit', 'LibraryEditorPage', { quizId: 'quiz-1' }],
+    ['/library/quiz-1', 'LibraryQuizPage', { quizId: 'quiz-1' }],
+    [
+      '/library/quiz-1/versions/2',
+      'LibraryVersionPage',
+      { quizId: 'quiz-1', versionNumber: '2' },
+    ],
     ['/join/ROOM123', 'ParticipantPage', { joinCode: 'ROOM123' }],
     ['/host/event-1', 'HostPage', { eventId: 'event-1' }],
     ...[

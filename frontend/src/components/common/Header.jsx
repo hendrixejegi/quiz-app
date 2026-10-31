@@ -20,6 +20,11 @@ export default function Header() {
         </span>
       </Link>
       <div className="topbar-tools">
+        {user && (
+          <Link className="topbar-account" to="/library">
+            My quizzes
+          </Link>
+        )}
         <Link
           className="topbar-account"
           to={user ? '/account/profile' : '/account/login'}

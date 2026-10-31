@@ -8,13 +8,15 @@ export default function AppLayout({ children }) {
   const content = useRef(null);
   const { error, refreshUser } = useAuth();
   useEffect(() => {
-    document.title = pathname.startsWith('/account/')
-      ? 'Account · QuizPop'
-      : pathname.startsWith('/host/')
-        ? 'Host room · QuizPop'
-        : pathname.startsWith('/join/')
-          ? 'Join quiz · QuizPop'
-          : 'QuizPop — Live Quiz Competition';
+    document.title = pathname.startsWith('/library')
+      ? 'My quizzes · QuizPop'
+      : pathname.startsWith('/account/')
+        ? 'Account · QuizPop'
+        : pathname.startsWith('/host/')
+          ? 'Host room · QuizPop'
+          : pathname.startsWith('/join/')
+            ? 'Join quiz · QuizPop'
+            : 'QuizPop — Live Quiz Competition';
     window.scrollTo(0, 0);
     content.current?.focus({ preventScroll: true });
   }, [pathname, key]);

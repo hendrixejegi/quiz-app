@@ -6,6 +6,10 @@ export default function QuestionEditor({
   onRemove,
   onChange,
 }) {
+  const choices = Array.from(
+    { length: 4 },
+    (_, index) => question.choices[index] ?? '',
+  );
   return (
     <article className="question-editor" key={index}>
       <div className="question-editor-top">
@@ -33,7 +37,7 @@ export default function QuestionEditor({
         required
       />
       <div className="choice-grid">
-        {question.choices.map((choice, ci) => (
+        {choices.map((choice, ci) => (
           <label
             className={`choice-field ${question.correct_choice_index === ci ? 'correct' : ''}`}
             key={ci}
@@ -48,7 +52,7 @@ export default function QuestionEditor({
               value={choice}
               onChange={(e) =>
                 onChange({
-                  choices: question.choices.map((value, index) =>
+                  choices: choices.map((value, index) =>
                     index === ci ? e.target.value : value,
                   ),
                 })
@@ -78,11 +82,13 @@ export default function QuestionEditor({
               onChange({ time_limit_seconds: Number(e.target.value) })
             }
           >
-            {[10, 15, 20, 30, 45, 60].map((n) => (
-              <option key={n} value={n}>
-                {n}s
-              </option>
-            ))}
+            {[...new Set([10, 15, 20, 30, 45, 60, question.time_limit_seconds])]
+              .sort((a, b) => a - b)
+              .map((n) => (
+                <option key={n} value={n}>
+                  {n}s
+                </option>
+              ))}
           </select>
         </label>
       </div>

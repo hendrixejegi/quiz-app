@@ -19,7 +19,7 @@ frontend/                 Vite + React client
   src/routes.js           Routes and backwards-compatible redirects
   src/pages/              Creation, host, participant, and account pages
   src/components/         Reusable quiz, live-game, account, and layout controls
-  src/contexts/           Authentication, theme, and in-memory quiz drafts
+  src/contexts/           Authentication, theme, and home-page in-memory drafts
   src/hooks/              Page actions, countdown, clipboard, and room subscriptions
   src/live/               Independently tested host/participant transport lifecycles
   src/demoQuiz.js         Local demo question banks, shuffling, and API payloads
@@ -179,3 +179,73 @@ python -m pytest tests/test_event_concurrency.py -q
 ```
 
 These checks create and drop a unique test schema. Without this variable, PostgreSQL checks are skipped; SQLite checks still run.
+
+
+## Personal quiz library
+
+Sign in with a verified account and open **My quizzes** (`/library`). The library is private: publishing means ready to reuse, not publicly listed. Home-page quick launch still creates events directly and does not automatically save library content or import historical games.
+
+Use **New quiz** to start a draft. **Save draft** permits unfinished titles, prompts, and choices; refresh or sign in on another device to resume saved work. Leaving unsaved edits requires confirmation. **Save and publish** validates and saves the current contents atomically, creating an immutable numbered version. **Host this version** separately creates a lobby from that exact version. Editing/publishing later does not change old versions or existing games. Closing/deleting an event does not delete library content.
+
+New routes: `/library`, `/library/new`, `/library/:quizId/edit`, `/library/:quizId`, and `/library/:quizId/versions/:versionNumber`. Version previews include correct answers and remain owner-only. Overview hosting selects the latest published version; history can launch older versions.
+
+### Required migration
+
+This feature requires `0002_quiz_library`. Stop the API, confirm the target database, back it up as appropriate, then run from `backend/`:
+
+```powershell
+python -m alembic current
+python -m alembic upgrade head
+python -m alembic check
+```
+
+Restart the API after upgrading. Existing events receive a nullable source-version reference; their content, credentials, answers and standings are retained. No existing games are imported into the library. The migration adds `library_quizzes` and `quiz_versions`; downgrade deliberately refuses to discard saved/published data. Do not use `stamp head` to skip the new schema. Implementation validation uses disposable databases; the configured product database is not automatically migrated.
+
+### Library API
+
+Interactive request/response schemas, examples and error responses are under **Personal quiz library** in FastAPI `/docs`; the machine-readable specification is `/openapi.json`. All endpoints below require a verified account session. Mutations also require the existing allowed `Origin`, CSRF cookie and `X-CSRF-Token` from `/api/auth/csrf`.
+
+| Method | Path | Result |
+| --- | --- | --- |
+| GET | `/api/library/quizzes?offset=0&limit=20` | Owner-only summaries, total and pagination (limit 1–100) |
+| POST | `/api/library/quizzes` | Create draft, optionally publish atomically; 201 `{quiz, version}` |
+| GET | `/api/library/quizzes/{id}` | Saved draft, revision, latest version and unpublished-changes status |
+| PUT | `/api/library/quizzes/{id}` | Save draft using the expected `revision` |
+| POST | `/api/library/quizzes/{id}/publish` | Save submitted content and publish; `{quiz, version}` |
+| GET | `/api/library/quizzes/{id}/versions` | Version history, newest first |
+| GET | `/api/library/quizzes/{id}/versions/{number}` | Fixed version including choices, answer key and timers |
+| POST | `/api/library/quizzes/{id}/versions/{number}/events` | Fresh lobby; 201 with existing event/share-link response |
+
+Example creation body (set `publish` to true to validate and publish immediately):
+
+```json
+{
+  "title": "Python basics",
+  "publish": false,
+  "questions": [{
+    "prompt": "Which keyword defines a function?",
+    "choices": ["", "def", "class", ""],
+    "correct_choice_index": 1,
+    "time_limit_seconds": 20
+  }]
+}
+```
+
+To save or publish an existing draft, send the same title/questions with `"revision": 1` (the most recently returned revision), without `publish`. Revisions advance only when content changes. Stale saves/publications return 409 and do not overwrite data. Reload the saved draft after explicitly deciding to discard local edits. Repeating publication of the same saved revision returns the existing version.
+
+Draft limits: title 100 characters, up to 20 questions, prompt 500 characters, up to four choices of 200 characters, timers 5–300 seconds. Blank content and zero questions are allowed while drafting. Publication requires a nonblank title and prompt, 1–20 questions, 2–4 filled choices and one nonblank correct choice. Blank choice slots are removed and the selected correct-answer index is remapped in the published snapshot. The editable draft retains its original slots.
+
+Missing or another owner's resources return 404; missing authentication returns 401; unverified accounts/CSRF failures return 403; invalid content returns 422. Publications serialize on the quiz row and enforce unique version numbers/source revisions. Synchronous database work runs outside the async event loop. This release has no library deletion, subjects/topics, organisations, AI, assignments or public sharing.
+
+### Library validation
+
+After configuring the disposable SQLite `auth-test` database described above:
+
+```powershell
+python -m pytest tests -q
+python -m pytest tests/test_quiz_library.py tests/test_auth_migration.py -q
+```
+
+Run `npm test` and `npm run build` from `frontend/`. Optional PostgreSQL publication checks require `TEST_POSTGRES_URL` pointing at a different disposable database with `test` in its name; run `python -m pytest tests/test_library_concurrency.py -q`. They create/drop a unique schema and skip when no test URL is supplied. Never point tests at the product database.
+
+Browser validation: create an incomplete draft, save/reload, test unsaved-navigation cancellation, publish v1, launch it, edit/publish v2, and verify the old lobby still plays v1. Verify stale edits from a second tab produce a conflict without losing local text; explicitly reload, preview both versions, and host from history. Check signed-out redirects, account switches/logout, loading/errors, and 390/768/1440-pixel light/dark screens.

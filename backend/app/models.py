@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, JSON
+from fastapi_users_db_sqlalchemy.generics import GUID
+import uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -10,11 +12,16 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def utc_datetime(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
 class Event(Base):
     __tablename__ = "events"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    source_version_id: Mapped[str | None] = mapped_column(ForeignKey("quiz_versions.id", ondelete="RESTRICT"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(100), nullable=False)
     join_code: Mapped[str] = mapped_column(String(8), unique=True, index=True, nullable=False)
     host_token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -85,3 +92,31 @@ class ParticipantAnswer(Base):
     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), nullable=False)
     choice_index: Mapped[int] = mapped_column(Integer, nullable=False)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class LibraryQuiz(Base):
+    __tablename__ = "library_quizzes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("user.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    questions: Mapped[list] = mapped_column(JSON, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class QuizVersion(Base):
+    __tablename__ = "quiz_versions"
+    __table_args__ = (
+        UniqueConstraint("quiz_id", "number", name="uq_quiz_version_number"),
+        UniqueConstraint("quiz_id", "draft_revision", name="uq_quiz_version_revision"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    quiz_id: Mapped[str] = mapped_column(ForeignKey("library_quizzes.id", ondelete="RESTRICT"), nullable=False, index=True)
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    draft_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(100), nullable=False)
+    questions: Mapped[list] = mapped_column(JSON, nullable=False)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
