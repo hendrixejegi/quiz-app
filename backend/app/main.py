@@ -264,15 +264,21 @@ def advance_expired_event(db: Session, event: Event, now: datetime | None = None
     return changed
 
 
+def advance_expired_events():
+    # PostgreSQL lock waits must not block request completion on the event loop.
+    # Each session belongs entirely to this worker thread.
+    with SessionLocal() as db:
+        ids = db.scalars(select(Event.id).where(Event.state.in_(["active", "results"]))).all()
+    for event_id in ids:
+        with SessionLocal() as db:
+            event = locked_event(db, event_id)
+            if event is not None:
+                advance_expired_event(db, event)
+
+
 async def timer_worker():
     while True:
-        with SessionLocal() as db:
-            ids = db.scalars(select(Event.id).where(Event.state.in_(["active", "results"]))).all()
-        for event_id in ids:
-            with SessionLocal() as db:
-                event = locked_event(db, event_id)
-                if event is not None:
-                    advance_expired_event(db, event)
+        await asyncio.to_thread(advance_expired_events)
         await asyncio.sleep(0.2)
 
 
@@ -518,18 +524,23 @@ async def host_lobby_updates(websocket: WebSocket, event_id: str):
         token = await asyncio.wait_for(websocket.receive_text(), timeout=10)
         while True:
             user = await websocket_user(websocket.cookies.get('quizpop_session'))
-            with SessionLocal() as db:
-                event = db.get(Event, event_id)
-                try:
-                    authorize_host(event, f'Bearer {token}', user)
-                except HTTPException:
-                    await websocket.close(code=4403)
-                    return
-                await websocket.send_json({"type": "host_lobby", "data": host_lobby_payload(db, event)})
+            try:
+                data = await asyncio.to_thread(authorized_host_snapshot, event_id, token, user)
+            except HTTPException:
+                await websocket.close(code=4403)
+                return
+            await websocket.send_json({"type": "host_lobby", "data": data})
             # Recheck database session and ownership before every protected update.
             await asyncio.sleep(1)
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
+
+
+def authorized_host_snapshot(event_id: str, token: str, user) -> dict:
+    with SessionLocal() as db:
+        event = db.get(Event, event_id)
+        authorize_host(event, f'Bearer {token}', user)
+        return host_lobby_payload(db, event)
 
 
 @app.post("/api/host/{event_id}/start")
