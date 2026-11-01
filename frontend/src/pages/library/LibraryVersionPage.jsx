@@ -1,3 +1,4 @@
+import { useLibraryScope } from '../../contexts/WorkspaceContext';
 import { Link, useParams } from 'react-router';
 import LibraryAccess, {
   LibraryHeading,
@@ -20,8 +21,9 @@ export default function LibraryVersionPage() {
   );
 }
 function VersionPreview({ quizId, number }) {
+  const { base, apiBase } = useLibraryScope();
   const resource = useLibraryResource(
-    `/api/library/quizzes/${quizId}/versions/${number}`,
+    `${apiBase}/${quizId}/versions/${number}`,
   );
   const { created, task, host } = useVersionLaunch(quizId);
   if (created) return <CreationConfirmation created={created} />;
@@ -48,12 +50,14 @@ function VersionPreview({ quizId, number }) {
             version.
           </p>
           <div className="library-actions">
-            <Link className="back-link" to={`/library/${quizId}`}>
+            <Link className="back-link" to={`${base}/${quizId}`}>
               Version history
             </Link>
-            <Link className="back-link" to={`/library/${quizId}/edit`}>
-              Edit draft
-            </Link>
+            {version.capabilities?.can_edit_draft !== false && (
+              <Link className="back-link" to={`${base}/${quizId}/edit`}>
+                Edit draft
+              </Link>
+            )}
           </div>
           {task.error && (
             <p className="error-message" role="alert">

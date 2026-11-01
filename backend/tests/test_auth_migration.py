@@ -18,8 +18,8 @@ def test_migration_preserves_legacy_event_and_is_repeatable(tmp_path):
         assert result.returncode == 0, result.stderr
     assert {'user', 'oauth_account', 'accesstoken'} <= set(inspect(engine).get_table_names())
     with engine.connect() as db:
-        event = db.execute(text('SELECT title, host_token_hash, owner_id FROM events WHERE id = :id'), {'id': 'old'}).one()
-        assert tuple(event) == ('Existing quiz', 'existing-secret-hash', None)
+        event = db.execute(text('SELECT title, host_token_hash, owner_id, organisation_id FROM events WHERE id = :id'), {'id': 'old'}).one()
+        assert tuple(event) == ('Existing quiz', 'existing-secret-hash', None, None)
     engine.dispose()
 
 
@@ -73,6 +73,9 @@ def test_library_upgrade_keeps_existing_game_content_and_answers(tmp_path):
     upgrade('head')
     with engine.connect() as db:
         assert db.execute(text('SELECT title, source_version_id FROM events')).one() == ('Original',None)
+        assert db.execute(text('SELECT organisation_id FROM events')).scalar() is None
+        assert db.execute(text('SELECT user_id FROM participants')).scalar() is None
+        assert db.execute(text('SELECT count(*) FROM organisations')).scalar() == 0
         assert db.execute(text('SELECT prompt FROM questions')).scalar() == 'Original?'
         assert db.execute(text('SELECT count(*) FROM choices')).scalar() == 2
         assert db.execute(text('SELECT choice_index FROM participant_answers')).scalar() == 0

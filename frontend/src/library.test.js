@@ -36,3 +36,17 @@ test('draft editor clones private content without changing saved choice slots', 
   assert.equal(quiz.questions[0].choices[0], 'A');
   assert.equal(quizTitle('  '), 'Untitled quiz');
 });
+
+test('organisation and member game authentication returns preserve private destinations without fragments', () => {
+  for (const path of [
+    '/organisations',
+    '/organisations/team/library/quiz/edit',
+    '/organisations/invitations/accept',
+    '/join/ROOM',
+  ])
+    assert.equal(libraryReturnPath(path), path);
+  assert.equal(
+    libraryReturnPath('/organisations/invitations/accept#secret'),
+    '/organisations/invitations/accept',
+  );
+});

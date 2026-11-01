@@ -1,3 +1,4 @@
+import { useAuth } from '../contexts/AuthContext';
 import { ArrowLeft, ArrowRight, Users } from 'lucide-react';
 import { Link, useParams } from 'react-router';
 import { useParticipantRoom } from '../hooks/useParticipantRoom';
@@ -9,9 +10,10 @@ import QuestionResults from '../components/game/QuestionResults';
 import ActiveQuestion from '../components/game/ActiveQuestion';
 export default function ParticipantPage() {
   const { joinCode } = useParams();
+  const { user, loading } = useAuth();
   return (
     <ParticipantRoom
-      key={joinCode.toUpperCase()}
+      key={`${joinCode.toUpperCase()}:${loading ? 'loading' : user?.id || 'guest'}`}
       joinCode={joinCode.toUpperCase()}
     />
   );
@@ -19,6 +21,7 @@ export default function ParticipantPage() {
 function ParticipantRoom({ joinCode }) {
   const {
     event,
+    access,
     participant,
     joinForm,
     setJoinForm,
@@ -37,9 +40,28 @@ function ParticipantRoom({ joinCode }) {
       <Link className="back-link" to="/">
         <ArrowLeft size={15} /> Create a quiz
       </Link>
+      {event?.organisation_id && (
+        <p className="library-help">
+          Organisation game · Active membership required
+        </p>
+      )}
       {error && !event ? (
         <div className="notice-card error-message" role="alert">
           {error}
+          {access === 'ORG_AUTH_REQUIRED' && (
+            <p>
+              <Link
+                to={`/account/login?next=${encodeURIComponent('/join/' + joinCode)}`}
+              >
+                Sign in to join
+              </Link>
+            </p>
+          )}
+          {access && (
+            <p>
+              <Link to="/organisations">Your organisations</Link>
+            </p>
+          )}
         </div>
       ) : event?.state === 'closed' ? (
         <section className="notice-card terminal-card">

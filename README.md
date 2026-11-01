@@ -235,7 +235,7 @@ To save or publish an existing draft, send the same title/questions with `"revis
 
 Draft limits: title 100 characters, up to 20 questions, prompt 500 characters, up to four choices of 200 characters, timers 5–300 seconds. Blank content and zero questions are allowed while drafting. Publication requires a nonblank title and prompt, 1–20 questions, 2–4 filled choices and one nonblank correct choice. Blank choice slots are removed and the selected correct-answer index is remapped in the published snapshot. The editable draft retains its original slots.
 
-Missing or another owner's resources return 404; missing authentication returns 401; unverified accounts/CSRF failures return 403; invalid content returns 422. Publications serialize on the quiz row and enforce unique version numbers/source revisions. Synchronous database work runs outside the async event loop. This release has no library deletion, subjects/topics, organisations, AI, assignments or public sharing.
+Missing or another owner's resources return 404; missing authentication returns 401; unverified accounts/CSRF failures return 403; invalid content returns 422. Publications serialize on the quiz row and enforce unique version numbers/source revisions. Synchronous database work runs outside the async event loop. This release has no library deletion, subjects/topics, AI, assignments or public sharing.
 
 ### Library validation
 
@@ -249,3 +249,115 @@ python -m pytest tests/test_quiz_library.py tests/test_auth_migration.py -q
 Run `npm test` and `npm run build` from `frontend/`. Optional PostgreSQL publication checks require `TEST_POSTGRES_URL` pointing at a different disposable database with `test` in its name; run `python -m pytest tests/test_library_concurrency.py -q`. They create/drop a unique schema and skip when no test URL is supplied. Never point tests at the product database.
 
 Browser validation: create an incomplete draft, save/reload, test unsaved-navigation cancellation, publish v1, launch it, edit/publish v2, and verify the old lobby still plays v1. Verify stale edits from a second tab produce a conflict without losing local text; explicitly reload, preview both versions, and host from history. Check signed-out redirects, account switches/logout, loading/errors, and 390/768/1440-pixel light/dark screens.
+
+
+## Organisation workspaces and permissions
+
+Personal quizzes and quick-launch games remain personal. Organisations have their own shared library and member-only games; publication is private to the organisation, not public sharing. Existing data is never automatically assigned to an organisation or linked to an account.
+
+| Capability | Owner | Admin | Instructor | Learner |
+| --- | --- | --- | --- | --- |
+| Organisation overview and member-only participation | Yes | Yes | Yes | Yes |
+| Draft read/edit/publish | All | All | Own authored drafts | No |
+| Published answer preview and hosting | Yes | Yes | Yes | No |
+| Host control | All | All | Games they launched, while still an instructor | No |
+| Manage instructors/learners and invitations; read audit | Yes | Yes | No | No |
+| Manage admins; rename; transfer ownership | Yes | No | No | No |
+
+Verified accounts can create organisations. Each has exactly one active owner: a partial unique index prevents duplicate owners, and locked transactional services prevent removing the last owner. Transferring to an active member makes the previous owner an admin. Owners must transfer before leaving. Removing/leaving deactivates membership and retains drafts, versions, games, answers and audit history. Platform-admin flags grant no organisation permissions.
+
+The workspace switcher follows the URL. `/organisations` lists/creates workspaces; `/organisations/{id}` is the overview, with `/members`, `/invitations`, `/settings`, `/audit` and `/library` screens. Shared library editor/history/version routes mirror `/library`. Learners see an overview and join form without answer keys or editor controls. Instructors see published versions by other authors, but never their unpublished drafts or edits. Personal quiz details offer **Copy to organisation**; this creates a new draft without moving the original or copying version history.
+
+### Organisation API
+
+All endpoints require verified cookie authentication. Mutations use the existing `Origin` and `X-CSRF-Token` protections. Interactive schemas and permission/conflict examples are in `/docs`.
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| GET / POST | `/api/organisations` | List active memberships / create with `{ "name": "Learning team" }` |
+| GET / PATCH | `/api/organisations/{id}` | Metadata, own role and capabilities / owner-only rename |
+| GET | `/api/organisations/{id}/members` | Manager-only active and inactive memberships |
+| PATCH / DELETE | `/api/organisations/{id}/members/{membershipId}` | Assign `{ "role": "learner" }` / deactivate; owner required to manage admins |
+| POST | `/api/organisations/{id}/ownership` | Owner transfers using `{ "user_id": "account-uuid" }` |
+| POST | `/api/organisations/{id}/leave` | Deactivate own non-owner membership |
+| GET / POST | `/api/organisations/{id}/invitations` | List / create email-bound role invitation |
+| POST | `/api/organisations/{id}/invitations/{invitationId}/regenerate` | Rotate link; old secret becomes unusable |
+| DELETE | `/api/organisations/{id}/invitations/{invitationId}` | Revoke unused invitation |
+| POST | `/api/organisations/invitations/preview` | Confirm destination/role with `{ "token": "fragment-secret" }` |
+| POST | `/api/organisations/invitations/accept` | Explicit acceptance with same token body |
+| GET | `/api/organisations/{id}/audit?offset=0&limit=20` | Manager-only paginated safe audit records |
+| POST | `/api/organisations/{id}/quizzes/copy-personal/{quizId}` | Copy own saved personal draft into a new shared draft |
+
+`/api/organisations/{id}/quizzes` supports the same list/create/read/save/publish/version/version-launch suffixes and revision payloads as `/api/library/quizzes`. Returned capabilities determine available draft actions. Other instructors' detail responses have `questions`, `revision` and `has_unpublished_changes` set to null and use the latest published title/count/time. Learners cannot access this namespace. Launching `/.../versions/{number}/events` snapshots content into a fresh organisation lobby and returns the existing confirmation payload.
+
+Example invitation creation:
+
+```json
+{ "email": "learner@example.com", "role": "learner" }
+```
+
+The response includes `{ "invitation": { ... }, "url": "https://your-frontend/organisations/invitations/accept#SECRET" }`. Share this link manually; automatic email is deferred. Links expire in seven days, are stored as hashes only, and are invalidated by regeneration, revocation or loss of the issuer's management privileges. The frontend captures the fragment in tab-scoped session storage, replaces the visible URL, and submits the secret only in POST bodies. Sign-in, registration, verification and Google sign-in preserve the pending invitation; acceptance always requires an explicit confirmation and a matching normalized verified email. An invitation cannot change an active member's role. Replays cannot restore revoked access; a new invitation is needed to reactivate membership.
+
+Missing/inaccessible resources return 404. Disallowed actions inside an accessible organisation return 403. Ownership, membership, invitation and stale-revision conflicts return 409; expired invitations return 410; invalid bodies return 422. Organisation games return generic `ORG_AUTH_REQUIRED` (401) or `ORG_ACCESS_REVOKED` (403) errors without private quiz metadata. A token used by another account returns `ORG_PARTICIPANT_MISMATCH` (403).
+
+Member games bind entries to verified accounts and require active membership for joining, reconnecting, state reads and answers. Eligible rejoining resumes the same entry and rotates its reconnect token. Personal guest tokens remain independent. Host HTTP/WebSocket access rechecks current membership and role; owner/admin takeover is allowed. Workspace screens recheck on navigation, focus and a five-second heartbeat; revocation clears private UI and cancels pending requests. Participant polling stops and clears private results/tokens on organisation authorization failure.
+
+Successful organisation/content/control mutations and safe authorization denials are audited with actor, organisation, action, target, outcome, time and correlation ID. No invitation secrets, emails, question bodies or answer content enter audit rows. Protected writes acquire an organisation shared lock before content/event locks; membership changes take an exclusive organisation lock. Blocking database operations run outside the async event loop.
+
+### Organisation migration and validation
+
+Revision `0003_organisations` adds organisation/membership/invitation/audit tables and nullable organisation/account references. Existing quizzes/events remain personal and existing guest entries remain unlinked. No destructive downgrade is provided. Startup checks required tables/columns and reports an actionable migration error instead of serving unexplained request-time 500s; it never migrates automatically.
+
+Back up the intended database and rehearse the migration on a disposable copy first. From `backend/`, with the correct virtual environment and `DATABASE_URL` selected:
+
+```powershell
+python -m alembic current
+python -m alembic upgrade head
+python -m alembic check
+```
+
+The same upgrade command applies after future additive revisions; generate/review future revisions using the migration workflow above. Restart the API after upgrading. Implementation validation uses disposable databases only; applying this revision to the configured product database requires explicit authorization.
+
+Run the full suites with an isolated SQLite database (the authentication test guard requires `auth-test` in its name):
+
+```powershell
+$env:DATABASE_URL = 'sqlite:///./auth-test-organisations.db'
+$env:AUTH_SECRET = 'disposable-test-secret'
+$env:AUTH_COOKIE_SECURE = 'false'
+python -m pytest tests -q
+```
+
+From `frontend/`, run `npm test` and `npm run build`. Optional PostgreSQL races use `TEST_POSTGRES_URL` with a separately provisioned disposable database containing `test` in its name and different from the configured database. Run `python -m pytest tests/test_organisation_concurrency.py -q`. Tests create/drop a unique schema and cover acceptance, owner transfer, revocation versus protected writes, and publication. They skip when no disposable PostgreSQL URL is supplied. Never use the product database.
+
+Browser regression: exercise all four roles in two organisations, personal copying, hidden peer drafts, explicit invitation acceptance and wrong-email failures, shared hosting/member participation, ownership transfer, and removal while connected. Check light/dark layouts at 390/768/1440 pixels and confirm personal guest flows still work. Deferred: groups, assignments, analytics, automated invitation email and organisation deletion.
+
+### Mailtrap SMTP for account emails
+
+Verification and password-reset emails use the existing Python SMTP sender with STARTTLS on port 587, a verified TLS context, and plain-text/HTML alternatives. No Mailtrap SDK or MCP server is required for application email delivery. Recipients come from the account flow; the sample recipient is not hardcoded into the application.
+
+Set these values in **backend/.env**, following backend/.env.example:
+
+```dotenv
+SMTP_HOST=live.smtp.mailtrap.io
+SMTP_PORT=587
+SMTP_STARTTLS=true
+SMTP_USERNAME=api
+SMTP_PASSWORD=<YOUR_API_TOKEN>
+SMTP_FROM=QuizPop <hello@quizpop.name.ng>
+FRONTEND_URL=http://localhost:5173
+```
+
+Replace **`<YOUR_API_TOKEN>`** with the live Email Sending API token authorized for your Mailtrap sending domain. Keep it only in the local environment or deployment secrets. `hello@quizpop.name.ng` is the requested sender: verify **quizpop.name.ng** in Mailtrap and complete any required sending approval before using it. If using another verified domain, replace `SMTP_FROM` accordingly. For deployment, replace `FRONTEND_URL` with your public frontend HTTPS origin so account links reach the correct site. The MCP API token/account/inbox configuration is separate; no inbox ID is required for live SMTP.
+
+Restart the backend after changing its environment. Request a verification email for a registered, unverified account from `/account/verify`. For a manual smoke test using the sample recipient `tosanwumiae@gmail.com`, that address must belong to the account being verified. Password recovery uses the same sender and actual account recipient. Demo-domain credentials retain the provider's owner-only recipient restriction; switching hostnames alone does not remove it.
+
+Inspect accepted/rejected deliveries in [Mailtrap Email Logs](https://mailtrap.io/sending/email_logs). See [Mailtrap Email API/SMTP setup](https://docs.mailtrap.io/getting-started/email-api-smtp.md) for sender/domain setup. Provider rejection, authentication and connection failures return a safe 503 message; raw SMTP errors, recipient addresses, passwords and account tokens are not logged. Incomplete configuration is rejected before connecting. Account verification is never bypassed when delivery fails.
+
+Run isolated checks from backend/ (no real messages are sent):
+
+```powershell
+$env:DATABASE_URL = 'sqlite:///./auth-test-mailtrap.db'
+$env:AUTH_SECRET = 'disposable-test-secret'
+$env:AUTH_COOKIE_SECURE = 'false'
+python -m pytest tests/test_email_delivery.py tests/test_auth.py -q
+```

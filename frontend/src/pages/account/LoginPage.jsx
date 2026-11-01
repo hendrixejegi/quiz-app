@@ -31,7 +31,15 @@ export default function LoginPage() {
       },
       (user) => {
         setUser(user);
-        navigate(libraryReturnPath(params.get('next')));
+        const target = libraryReturnPath(
+          params.get('next') ||
+            sessionStorage.getItem('quizpop:auth-return') ||
+            (sessionStorage.getItem('quizpop:pending-invitation')
+              ? '/organisations/invitations/accept'
+              : null),
+        );
+        sessionStorage.removeItem('quizpop:auth-return');
+        navigate(target);
       },
     );
   }

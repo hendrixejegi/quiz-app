@@ -45,10 +45,12 @@ export async function api(path, options = {}) {
     };
     const detail =
       typeof body.detail === 'string' ? body.detail : body.detail?.reason;
-    throw new ApiError(
+    const error = new ApiError(
       messages[detail] || detail || 'Please check the details and try again.',
       response.status,
     );
+    error.code = body.detail?.code;
+    throw error;
   }
   return body;
 }

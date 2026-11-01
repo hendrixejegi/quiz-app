@@ -17,6 +17,8 @@ export function useLibraryResource(path) {
       .catch((reason) => {
         if (controller.signal.aborted) return;
         if (reason.status === 401) setUser(null);
+        if ([403, 404].includes(reason.status))
+          window.dispatchEvent(new Event('quizpop:workspace-refresh'));
         setState({ data: null, loading: false, error: reason.message });
       });
     return () => controller.abort();

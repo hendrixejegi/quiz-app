@@ -1,3 +1,4 @@
+import { WorkspaceProvider } from '../contexts/WorkspaceContext';
 import { useEffect, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router';
 import Header from '../components/common/Header';
@@ -21,7 +22,7 @@ export default function AppLayout({ children }) {
     content.current?.focus({ preventScroll: true });
   }, [pathname, key]);
   return (
-    <main className="page-shell" ref={content} tabIndex={-1}>
+    <WorkspaceProvider><main className="page-shell" ref={content} tabIndex={-1}>
       <Header />
       <section className="hero-wrap">
         {error && (
@@ -35,6 +36,6 @@ export default function AppLayout({ children }) {
         {children ?? <Outlet />}
       </section>
       <Footer />
-    </main>
+    </main></WorkspaceProvider>
   );
 }

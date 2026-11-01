@@ -1,8 +1,10 @@
+import { useAuth } from '../contexts/AuthContext';
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { subscribeParticipant } from '../live/participantSubscription';
 import { useAsyncTask } from './useAsyncTask';
 export function useParticipantRoom(joinCode) {
+  const { user, loading: accountLoading } = useAuth();
   const [snapshot, setSnapshot] = useState({
     event: null,
     participant: null,
@@ -14,17 +16,17 @@ export function useParticipantRoom(joinCode) {
   const [optimistic, setOptimistic] = useState(null);
   const joinTask = useAsyncTask();
   const answerTask = useAsyncTask();
-  useEffect(
-    () =>
-      subscribeParticipant({
-        joinCode,
-        request: api,
-        storage: sessionStorage,
-        onChange: (updates) =>
-          setSnapshot((current) => ({ ...current, ...updates })),
-      }),
-    [joinCode, generation],
-  );
+  useEffect(() => {
+    if (accountLoading) return;
+    return subscribeParticipant({
+      accountId: user?.id,
+      joinCode,
+      request: api,
+      storage: sessionStorage,
+      onChange: (updates) =>
+        setSnapshot((current) => ({ ...current, ...updates })),
+    });
+  }, [joinCode, generation, user?.id, accountLoading]);
   function join(event) {
     event.preventDefault();
     if (joinTask.busy) return;
@@ -40,6 +42,7 @@ export function useParticipantRoom(joinCode) {
           `quiz:${joinCode}:reconnect`,
           result.reconnect_token,
         );
+        if (result.account_id) sessionStorage.setItem(`quiz:${joinCode}:reconnect:account`, result.account_id);
         setOptimistic(null);
         setSnapshot((current) => ({
           ...current,

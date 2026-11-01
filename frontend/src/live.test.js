@@ -329,3 +329,62 @@ for (const terminalState of ['closed', 'deleted']) {
     stop();
   });
 }
+
+test('organisation revocation clears private state and tokens without guest fallback or more polling', async () => {
+  const values = new Map([
+    ['quiz:ORG:reconnect', 'secret'],
+    ['quiz:ORG:reconnect:account', 'account-a'],
+  ]);
+  const updates = [],
+    calls = [],
+    timer = clock();
+  const stop = subscribeParticipant({
+    joinCode: 'ORG',
+    accountId: 'account-a',
+    storage: {
+      getItem: (k) => values.get(k),
+      removeItem: (k) => values.delete(k),
+    },
+    ...timer,
+    request: async (path) => {
+      calls.push(path);
+      throw Object.assign(new Error('Access revoked'), {
+        status: 403,
+        code: 'ORG_ACCESS_REVOKED',
+      });
+    },
+    onChange: (v) => updates.push(v),
+  });
+  await flush();
+  assert.deepEqual(calls, ['/api/events/ORG/state']);
+  assert.equal(values.size, 0);
+  assert.equal(timer.jobs.size, 0);
+  assert.equal(updates[0].event, null);
+  assert.equal(updates[0].participant, null);
+  assert.equal(updates.at(-1).access, 'ORG_ACCESS_REVOKED');
+  stop();
+});
+test('account changes discard organisation reconnect entries before any private request', async () => {
+  const values = new Map([
+      ['quiz:ORG:reconnect', 'other-secret'],
+      ['quiz:ORG:reconnect:account', 'account-a'],
+    ]),
+    calls = [];
+  const stop = subscribeParticipant({
+    joinCode: 'ORG',
+    accountId: 'account-b',
+    storage: {
+      getItem: (k) => values.get(k),
+      removeItem: (k) => values.delete(k),
+    },
+    request: async (path) => {
+      calls.push(path);
+      return { title: 'Members only', state: 'lobby' };
+    },
+    onChange: () => {},
+  });
+  await flush();
+  assert.deepEqual(calls, ['/api/events/ORG']);
+  assert.equal(values.size, 0);
+  stop();
+});

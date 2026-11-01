@@ -2,7 +2,7 @@
 export function libraryReturnPath(value) {
   if (
     typeof value !== 'string' ||
-    !value.startsWith('/library') ||
+    !/^\/(library|organisations|join)(\/|$|\?)/.test(value) ||
     value.startsWith('//') ||
     /[\\\r\n]/.test(value)
   )
@@ -10,8 +10,8 @@ export function libraryReturnPath(value) {
   try {
     const url = new URL(value, 'https://quizpop.invalid');
     return url.origin === 'https://quizpop.invalid' &&
-      (url.pathname === '/library' || url.pathname.startsWith('/library/'))
-      ? url.pathname + url.search + url.hash
+      /^\/(library|organisations|join)(\/|$)/.test(url.pathname)
+      ? url.pathname + url.search
       : '/';
   } catch {
     return '/';

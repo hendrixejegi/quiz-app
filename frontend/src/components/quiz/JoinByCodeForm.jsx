@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router';
 import { api } from '../../api';
 import { useAsyncTask } from '../../hooks/useAsyncTask';
 import ParticipantIdentityFields from './ParticipantIdentityFields';
-export default function JoinByCodeForm() {
+export default function JoinByCodeForm({ embedded = false }) {
   const [value, setValue] = useState({
     join_code: '',
     name: '',
@@ -30,6 +30,11 @@ export default function JoinByCodeForm() {
           `quiz:${code}:reconnect`,
           result.reconnect_token,
         );
+        if (result.account_id)
+          sessionStorage.setItem(
+            `quiz:${code}:reconnect:account`,
+            result.account_id,
+          );
         navigate(`/join/${encodeURIComponent(code)}`);
       },
     );
@@ -37,11 +42,19 @@ export default function JoinByCodeForm() {
   return (
     <form
       id="participant-entry-form"
-      className="join-card participant-entry-card"
+      className={
+        embedded
+          ? 'participant-entry-card organisation-join'
+          : 'join-card participant-entry-card'
+      }
       onSubmit={submit}
     >
-      <h2>Join with a code.</h2>
-      <p>Enter your details to join a quiz room.</p>
+      {!embedded && (
+        <>
+          <h2>Join with a code.</h2>
+          <p>Enter your details to join a quiz room.</p>
+        </>
+      )}
       <label className="field-label" htmlFor="participant-join-code">
         JOIN CODE
       </label>
