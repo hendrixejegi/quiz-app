@@ -3,6 +3,9 @@ import secrets
 import uuid
 import asyncio
 import smtplib
+import ssl
+import logging
+from html import escape
 from email.message import EmailMessage
 from urllib.parse import quote
 
@@ -54,21 +57,50 @@ def get_strategy(db=Depends(get_token_db)):
     return DatabaseStrategy(db, lifetime_seconds=SESSION_SECONDS)
 
 async def send_account_email(email, token, action):
-    if not os.getenv('SMTP_HOST'):
+    host = os.getenv('SMTP_HOST', '').strip()
+    sender = os.getenv('SMTP_FROM', '').strip()
+    username = os.getenv('SMTP_USERNAME', '')
+    password = os.getenv('SMTP_PASSWORD', '')
+    starttls = os.getenv('SMTP_STARTTLS', 'true').lower() == 'true'
+    if not host or not sender or (username and (not password or password.startswith('<'))):
         raise HTTPException(503, 'Email delivery is not configured. Please contact the administrator.')
+    try:
+        port = int(os.getenv('SMTP_PORT', '587'))
+        if not 1 <= port <= 65535:
+            raise ValueError
+    except ValueError:
+        raise HTTPException(503, 'Email delivery is not configured. Please contact the administrator.') from None
+    if host.lower() == 'live.smtp.mailtrap.io' and not starttls:
+        raise HTTPException(503, 'Email delivery requires a secure SMTP connection. Please contact the administrator.')
+    if action not in {'verify', 'reset'}:
+        raise ValueError('Unsupported account email action')
+    link = f'{FRONTEND}/account/{action}?token={quote(token, safe="")}'
+    instruction = 'Verify your email' if action == 'verify' else 'Reset your password'
     message = EmailMessage()
-    message['From'] = os.environ['SMTP_FROM']
+    message['From'] = sender
     message['To'] = email
     message['Subject'] = 'Verify your QuizPop email' if action == 'verify' else 'Reset your QuizPop password'
-    message.set_content(f"Open this link to {action} your account: {FRONTEND}/account/{action}?token={quote(token)}\nIf you did not request this, ignore this email.")
+    message.set_content(f'{instruction}: {link}\nIf you did not request this, ignore this email.')
+    message.add_alternative(
+        f'<html><body><h1>{instruction}</h1><p><a href="{escape(link, quote=True)}">'
+        f'{instruction}</a></p><p>If you did not request this, ignore this email.</p></body></html>',
+        subtype='html',
+    )
     def deliver():
-        with smtplib.SMTP(os.environ['SMTP_HOST'], int(os.getenv('SMTP_PORT', '587')), timeout=15) as smtp:
-            if os.getenv('SMTP_STARTTLS', 'true').lower() == 'true':
-                smtp.starttls()
-            if os.getenv('SMTP_USERNAME'):
-                smtp.login(os.environ['SMTP_USERNAME'], os.environ['SMTP_PASSWORD'])
-            smtp.send_message(message)
-    await asyncio.to_thread(deliver)
+        with smtplib.SMTP(host, port, timeout=15) as smtp:
+            if starttls:
+                smtp.starttls(context=ssl.create_default_context())
+            if username:
+                smtp.login(username, password)
+            refused = smtp.send_message(message)
+            if refused:
+                raise smtplib.SMTPRecipientsRefused(refused)
+    try:
+        await asyncio.to_thread(deliver)
+    except (smtplib.SMTPException, OSError) as error:
+        # Provider exceptions can contain recipients, credentials or message data.
+        logging.getLogger(__name__).warning('Account email delivery failed (%s)', type(error).__name__)
+        raise HTTPException(503, 'Email delivery is temporarily unavailable. Please try again later or contact the administrator.') from None
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     reset_password_token_secret = SECRET

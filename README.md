@@ -330,3 +330,34 @@ python -m pytest tests -q
 From `frontend/`, run `npm test` and `npm run build`. Optional PostgreSQL races use `TEST_POSTGRES_URL` with a separately provisioned disposable database containing `test` in its name and different from the configured database. Run `python -m pytest tests/test_organisation_concurrency.py -q`. Tests create/drop a unique schema and cover acceptance, owner transfer, revocation versus protected writes, and publication. They skip when no disposable PostgreSQL URL is supplied. Never use the product database.
 
 Browser regression: exercise all four roles in two organisations, personal copying, hidden peer drafts, explicit invitation acceptance and wrong-email failures, shared hosting/member participation, ownership transfer, and removal while connected. Check light/dark layouts at 390/768/1440 pixels and confirm personal guest flows still work. Deferred: groups, assignments, analytics, automated invitation email and organisation deletion.
+
+### Mailtrap SMTP for account emails
+
+Verification and password-reset emails use the existing Python SMTP sender with STARTTLS on port 587, a verified TLS context, and plain-text/HTML alternatives. No Mailtrap SDK or MCP server is required for application email delivery. Recipients come from the account flow; the sample recipient is not hardcoded into the application.
+
+Set these values in **backend/.env**, following backend/.env.example:
+
+```dotenv
+SMTP_HOST=live.smtp.mailtrap.io
+SMTP_PORT=587
+SMTP_STARTTLS=true
+SMTP_USERNAME=api
+SMTP_PASSWORD=<YOUR_API_TOKEN>
+SMTP_FROM=QuizPop <hello@quizpop.name.ng>
+FRONTEND_URL=http://localhost:5173
+```
+
+Replace **`<YOUR_API_TOKEN>`** with the live Email Sending API token authorized for your Mailtrap sending domain. Keep it only in the local environment or deployment secrets. `hello@quizpop.name.ng` is the requested sender: verify **quizpop.name.ng** in Mailtrap and complete any required sending approval before using it. If using another verified domain, replace `SMTP_FROM` accordingly. For deployment, replace `FRONTEND_URL` with your public frontend HTTPS origin so account links reach the correct site. The MCP API token/account/inbox configuration is separate; no inbox ID is required for live SMTP.
+
+Restart the backend after changing its environment. Request a verification email for a registered, unverified account from `/account/verify`. For a manual smoke test using the sample recipient `tosanwumiae@gmail.com`, that address must belong to the account being verified. Password recovery uses the same sender and actual account recipient. Demo-domain credentials retain the provider's owner-only recipient restriction; switching hostnames alone does not remove it.
+
+Inspect accepted/rejected deliveries in [Mailtrap Email Logs](https://mailtrap.io/sending/email_logs). See [Mailtrap Email API/SMTP setup](https://docs.mailtrap.io/getting-started/email-api-smtp.md) for sender/domain setup. Provider rejection, authentication and connection failures return a safe 503 message; raw SMTP errors, recipient addresses, passwords and account tokens are not logged. Incomplete configuration is rejected before connecting. Account verification is never bypassed when delivery fails.
+
+Run isolated checks from backend/ (no real messages are sent):
+
+```powershell
+$env:DATABASE_URL = 'sqlite:///./auth-test-mailtrap.db'
+$env:AUTH_SECRET = 'disposable-test-secret'
+$env:AUTH_COOKIE_SECURE = 'false'
+python -m pytest tests/test_email_delivery.py tests/test_auth.py -q
+```
