@@ -12,12 +12,15 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .database import SessionLocal, get_db
+from .database import SessionLocal, get_db, persist_organisation_denial
 from .models import Choice, Event, Participant, ParticipantAnswer, Question, utc_datetime
 from .schemas import AnswerSubmit, ParticipantJoin, QuizCreate
 from .auth import router as auth_router, current_user, optional_user, websocket_user
 from .library import router as library_router
 from .event_service import build_event, event_created_payload
+from .organisations import router as organisations_router
+from .organisation_library import router as organisation_library_router
+from .permissions import organisation_access, can_control, audit, denied
 
 POINTS_PER_CORRECT_ANSWER = 100
 RESULTS_INTERVAL_SECONDS = 5
@@ -25,6 +28,8 @@ RESULTS_INTERVAL_SECONDS = 5
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from .readiness import check_schema_ready
+    await asyncio.to_thread(check_schema_ready)
     # Older versions could persist an active state but had no timer fields.
     with SessionLocal() as db:
         legacy_active_events = db.scalars(select(Event.id).where(
@@ -47,7 +52,10 @@ async def lifespan(_: FastAPI):
         pass
 
 
-app = FastAPI(title="QuizPop API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="QuizPop API", version="0.1.0", lifespan=lifespan, openapi_tags=[
+    {"name":"Organisations and permissions", "description":"Verified accounts create private workspaces. Owner/admin manage instructors and learners; only owners manage admins, rename or transfer ownership. Learners may view the overview and join member games. Inaccessible resources return 404; disallowed actions within an accessible workspace return 403. Invitations require matching verified email and explicit acceptance; tokens travel in POST bodies only."},
+    {"name":"Organisation quiz library", "description":"Owner/admin can edit all drafts. Instructors edit their own drafts and preview/host any published version; peers' unpublished drafts and changes remain hidden. Learners have no library or answer-key access. Personal library routes explicitly exclude organisation records. Stale revisions return 409."},
+])
 frontend_origins = [origin.strip() for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -59,6 +67,8 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(library_router)
+app.include_router(organisations_router)
+app.include_router(organisation_library_router)
 
 @app.middleware("http")
 async def csrf_protection(request: Request, call_next):
@@ -107,14 +117,19 @@ async def csrf_protection(request: Request, call_next):
                 redirected.raw_headers.append((name, value))
         redirected.delete_cookie('quizpop_oauth_state')
         response = redirected
-    if request.url.path.startswith('/api/auth'):
+    if request.url.path.startswith(('/api/auth', '/api/organisations', '/api/library', '/api/host', '/api/events')):
         response.headers['Cache-Control'] = 'no-store'
     return response
 
 
-def authorize_host(event, authorization, user):
+def authorize_host(event, authorization, user, db=None):
     if event is None:
         raise HTTPException(404, "Quiz not found")
+    if event.organisation_id:
+        org, member = organisation_access(db, event.organisation_id, user)
+        if not can_control(member, event, user):
+            denied(db, org.id, user, 'event.control.denied', event.id)
+        return
     if event.owner_id:
         if user is None or str(user.id) != event.owner_id:
             raise HTTPException(403, "This quiz belongs to another account. Sign in as its owner.")
@@ -281,7 +296,7 @@ async def timer_worker():
         await asyncio.sleep(0.2)
 
 
-def participant_for_request(db: Session, event: Event, authorization: str | None) -> Participant:
+def participant_for_request(db: Session, event: Event, authorization: str | None, user=None) -> Participant:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Participant link required")
     token = authorization.removeprefix("Bearer ").strip()
@@ -291,6 +306,8 @@ def participant_for_request(db: Session, event: Event, authorization: str | None
     ))
     if participant is None or not secrets.compare_digest(participant.reconnect_token_hash, token_hash(token)):
         raise HTTPException(status_code=403, detail="Invalid participant link")
+    if event.organisation_id and (user is None or participant.user_id != user.id):
+        raise HTTPException(403, {"code":"ORG_PARTICIPANT_MISMATCH","reason":"This participant entry belongs to another account. Join with your own account."})
     return participant
 
 
@@ -304,6 +321,7 @@ def host_lobby_payload(db: Session, event: Event) -> dict:
         "title": event.title,
         "join_code": event.join_code,
         "state": event.state,
+        "organisation_id": event.organisation_id,
         "participant_count": len(participants),
         "participants": [
             {"name": participant.private_name, "display_name": participant.display_name}
@@ -330,8 +348,10 @@ def create_quiz(payload: QuizCreate, db: Session = Depends(get_db), user=Depends
 
 
 @app.get("/api/events/{join_code}")
-def get_public_event(join_code: str, db: Session = Depends(get_db)):
+def get_public_event(join_code: str, db: Session = Depends(get_db), user=Depends(optional_user)):
     event = lookup_event(db, join_code)
+    if event.organisation_id:
+        organisation_access(db, event.organisation_id, user, participant=True)
     if event.state == "closed":
         return {"title": event.title, "join_code": event.join_code, "state": "closed"}
     participant_count = db.scalar(
@@ -341,6 +361,7 @@ def get_public_event(join_code: str, db: Session = Depends(get_db)):
         "title": event.title,
         "join_code": event.join_code,
         "state": event.state,
+        "organisation_id": event.organisation_id,
         "participant_count": participant_count,
         "max_participants": 50,
     }
@@ -351,8 +372,22 @@ def join_event(
     join_code: str,
     payload: ParticipantJoin,
     db: Session = Depends(get_db),
+    user=Depends(optional_user),
 ):
     event = lookup_event(db, join_code)
+    if event.organisation_id:
+        organisation_access(db, event.organisation_id, user, 'shared', participant=True)
+    if event.organisation_id:
+        event = locked_event(db, event.id)
+        if event is None:
+            raise HTTPException(404, 'Event not found')
+    if event.organisation_id and event.state != "closed":
+        previous = db.scalar(select(Participant).where(Participant.event_id == event.id, Participant.user_id == user.id))
+        if previous is not None:
+            reconnect_token = secrets.token_urlsafe(32)
+            previous.reconnect_token_hash = token_hash(reconnect_token)
+            db.commit()
+            return {"participant_id":previous.id,"display_name":previous.display_name,"reconnect_token":reconnect_token,"state":event.state,"organisation_id":event.organisation_id,"account_id":str(user.id)}
     if event.state not in {"lobby", "active", "results"}:
         raise HTTPException(status_code=409, detail="This quiz is no longer accepting participants")
     count = db.scalar(select(func.count()).select_from(Participant).where(Participant.event_id == event.id)) or 0
@@ -371,6 +406,7 @@ def join_event(
     participant = Participant(
         id=str(uuid.uuid4()),
         event_id=event.id,
+        user_id=user.id if event.organisation_id else None,
         private_name=payload.name,
         display_name=payload.display_name,
         reconnect_token_hash=token_hash(reconnect_token),
@@ -386,6 +422,7 @@ def join_event(
         "display_name": participant.display_name,
         "reconnect_token": reconnect_token,
         "state": event.state,
+        **({"organisation_id":event.organisation_id,"account_id":str(user.id)} if event.organisation_id else {}),
     }
 
 
@@ -394,15 +431,19 @@ def get_participant_event_state(
     join_code: str,
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
+    user=Depends(optional_user),
 ):
     event = lookup_event(db, join_code)
-    participant = participant_for_request(db, event, authorization)
+    if event.organisation_id:
+        organisation_access(db, event.organisation_id, user, 'shared', participant=True)
+    participant = participant_for_request(db, event, authorization, user)
     advance_expired_event(db, event)
     result = {
         "title": event.title,
         "join_code": event.join_code,
         "state": event.state,
         "participant_display_name": participant.display_name,
+        "organisation_id": event.organisation_id,
     }
     if event.state == "closed":
         return {key: result[key] for key in ("title", "join_code", "state")}
@@ -449,10 +490,19 @@ def submit_participant_answer(
     payload: AnswerSubmit,
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
+    user=Depends(optional_user),
 ):
     event = lookup_event(db, join_code)
-    participant = participant_for_request(db, event, authorization)
+    if event.organisation_id:
+        organisation_access(db, event.organisation_id, user, 'shared', participant=True)
+    participant = participant_for_request(db, event, authorization, user)
     advance_expired_event(db, event)
+    if event.organisation_id:
+        # Timer advancement can commit; reacquire scope authorization before the answer write.
+        organisation_access(db, event.organisation_id, user, 'shared', participant=True)
+        event = locked_event(db, event.id)
+        if event is None:
+            raise HTTPException(404, 'Event not found')
     if event.state != "active" or event.current_question_position is None:
         raise HTTPException(status_code=409, detail="There is no active question")
     question = event.questions[event.current_question_position]
@@ -487,7 +537,7 @@ def submit_participant_answer(
 @app.get("/api/host/{event_id}")
 def get_host_event(event_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db), user=Depends(optional_user)):
     event = db.get(Event, event_id)
-    authorize_host(event, authorization, user)
+    authorize_host(event, authorization, user, db)
     return host_lobby_payload(db, event)
 
 
@@ -515,18 +565,26 @@ async def host_lobby_updates(websocket: WebSocket, event_id: str):
 
 def authorized_host_snapshot(event_id: str, token: str, user) -> dict:
     with SessionLocal() as db:
-        event = db.get(Event, event_id)
-        authorize_host(event, f'Bearer {token}', user)
-        return host_lobby_payload(db, event)
+        try:
+            event = db.get(Event, event_id)
+            authorize_host(event, f'Bearer {token}', user, db)
+            return host_lobby_payload(db, event)
+        finally:
+            persist_organisation_denial(db)
+
 
 
 @app.post("/api/host/{event_id}/start")
 def start_host_event(event_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db), user=Depends(optional_user)):
+    candidate = db.get(Event, event_id)
+    if candidate is not None and candidate.organisation_id:
+        organisation_access(db, candidate.organisation_id, user, 'shared')
     event = locked_event(db, event_id)
-    authorize_host(event, authorization, user)
+    authorize_host(event, authorization, user, db)
     if event.state != "lobby":
         raise HTTPException(status_code=409, detail="This quiz has already started")
 
+    if event.organisation_id: audit(db, event.organisation_id, user, "event.started", event.id)
     event.state = "active"
     event.current_question_position = 0
     event.timer_deadline = datetime.now(timezone.utc) + timedelta(seconds=event.questions[0].time_limit_seconds)
@@ -536,11 +594,15 @@ def start_host_event(event_id: str, authorization: str | None = Header(default=N
 
 @app.post("/api/host/{event_id}/close")
 def close_host_event(event_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db), user=Depends(optional_user)):
+    candidate = db.get(Event, event_id)
+    if candidate is not None and candidate.organisation_id:
+        organisation_access(db, candidate.organisation_id, user, 'shared')
     event = locked_event(db, event_id)
-    authorize_host(event, authorization, user)
+    authorize_host(event, authorization, user, db)
     if event.state not in {"completed", "closed"}:
         raise HTTPException(409, "Complete the quiz before closing it")
     if event.state == "completed":
+        if event.organisation_id: audit(db, event.organisation_id, user, "event.closed", event.id)
         event.state = "closed"
         db.flush()
     result = host_lobby_payload(db, event)
@@ -550,13 +612,17 @@ def close_host_event(event_id: str, authorization: str | None = Header(default=N
 
 @app.delete("/api/host/{event_id}", status_code=204)
 def delete_host_event(event_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db), user=Depends(optional_user)):
+    candidate = db.get(Event, event_id)
+    if candidate is not None and candidate.organisation_id:
+        organisation_access(db, candidate.organisation_id, user, 'shared')
     event = locked_event(db, event_id)
-    authorize_host(event, authorization, user)
+    authorize_host(event, authorization, user, db)
     if event.state != "closed":
         raise HTTPException(409, "Close the event before deleting it")
     db.execute(delete(ParticipantAnswer).where(
         (ParticipantAnswer.question_id.in_(select(Question.id).where(Question.event_id == event.id))) |
         (ParticipantAnswer.participant_id.in_(select(Participant.id).where(Participant.event_id == event.id)))
     ))
+    if event.organisation_id: audit(db, event.organisation_id, user, "event.deleted", event.id)
     db.delete(event)
     db.commit()

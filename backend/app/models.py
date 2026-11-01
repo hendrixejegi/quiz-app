@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, JSON
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, JSON, Boolean, Index, text
 from fastapi_users_db_sqlalchemy.generics import GUID
 import uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -21,6 +21,7 @@ class Event(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    organisation_id: Mapped[str | None] = mapped_column(ForeignKey("organisations.id", ondelete="RESTRICT"), nullable=True, index=True)
     source_version_id: Mapped[str | None] = mapped_column(ForeignKey("quiz_versions.id", ondelete="RESTRICT"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(100), nullable=False)
     join_code: Mapped[str] = mapped_column(String(8), unique=True, index=True, nullable=False)
@@ -64,9 +65,10 @@ class Choice(Base):
 
 class Participant(Base):
     __tablename__ = "participants"
-    __table_args__ = (UniqueConstraint("event_id", "display_name", name="uq_event_display_name"),)
+    __table_args__ = (UniqueConstraint("event_id", "display_name", name="uq_event_display_name"), UniqueConstraint("event_id", "user_id", name="uq_event_participant_account"))
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("user.id"), nullable=True)
     event_id: Mapped[str] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     private_name: Mapped[str] = mapped_column(String(80), nullable=False)
     display_name: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -99,6 +101,7 @@ class LibraryQuiz(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("user.id"), nullable=False, index=True)
+    organisation_id: Mapped[str | None] = mapped_column(ForeignKey("organisations.id", ondelete="RESTRICT"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(100), nullable=False, default="")
     questions: Mapped[list] = mapped_column(JSON, nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -120,3 +123,52 @@ class QuizVersion(Base):
     title: Mapped[str] = mapped_column(String(100), nullable=False)
     questions: Mapped[list] = mapped_column(JSON, nullable=False)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class Organisation(Base):
+    __tablename__ = "organisations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class Membership(Base):
+    __tablename__ = "organisation_memberships"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "user_id", name="uq_organisation_member"),
+        Index("uq_organisation_owner", "organisation_id", unique=True,
+              postgresql_where=text("role = 'owner' AND active = true"),
+              sqlite_where=text("role = 'owner' AND active = 1")),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("user.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class OrganisationInvitation(Base):
+    __tablename__ = "organisation_invitations"
+    __table_args__ = (Index("uq_pending_organisation_email", "organisation_id", "email", unique=True,
+        postgresql_where=text("status = 'pending'"), sqlite_where=text("status = 'pending'")),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    issuer_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("user.id"), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("user.id"), nullable=True)
+
+
+class OrganisationAudit(Base):
+    __tablename__ = "organisation_audit"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organisation_id: Mapped[str] = mapped_column(ForeignKey("organisations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    actor_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("user.id"), nullable=False)
+    action: Mapped[str] = mapped_column(String(80), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

@@ -1,3 +1,4 @@
+import { useLibraryScope } from '../../contexts/WorkspaceContext';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useBlocker, useNavigate, useParams } from 'react-router';
 import LibraryAccess, {
@@ -24,7 +25,14 @@ function EditorEntry({ quizId }) {
   return quizId ? <SavedEditor quizId={quizId} /> : <EditorForm saved={null} />;
 }
 function SavedEditor({ quizId }) {
-  const resource = useLibraryResource(`/api/library/quizzes/${quizId}`);
+  const { apiBase } = useLibraryScope();
+  const resource = useLibraryResource(`${apiBase}/${quizId}`);
+  if (resource.data?.capabilities?.can_edit_draft === false)
+    return (
+      <p role="alert">
+        Only the author or organisation managers can edit this draft.
+      </p>
+    );
   return resource.data ? (
     <EditorForm saved={resource.data} reload={resource.retry} />
   ) : (
@@ -32,6 +40,7 @@ function SavedEditor({ quizId }) {
   );
 }
 function EditorForm({ saved, reload }) {
+  const { base, apiBase } = useLibraryScope();
   const initial = saved
     ? draftContent(saved)
     : { title: '', questions: [blankQuestion()] };
@@ -65,8 +74,8 @@ function EditorForm({ saved, reload }) {
         try {
           return await api(
             saved
-              ? `/api/library/quizzes/${saved.id}${publishing ? '/publish' : ''}`
-              : '/api/library/quizzes',
+              ? `${apiBase}/${saved.id}${publishing ? '/publish' : ''}`
+              : apiBase,
             {
               method: saved && !publishing ? 'PUT' : 'POST',
               signal,
@@ -90,8 +99,8 @@ function EditorForm({ saved, reload }) {
           allowNavigation.current = true;
           navigate(
             publishing
-              ? `/library/${quiz.id}/versions/${result.version.number}`
-              : `/library/${quiz.id}/edit`,
+              ? `${base}/${quiz.id}/versions/${result.version.number}`
+              : `${base}/${quiz.id}/edit`,
             { replace: !saved },
           );
         }
@@ -113,7 +122,7 @@ function EditorForm({ saved, reload }) {
         description="Save unfinished ideas. Publish a version when every question is ready."
       >
         {saved && (
-          <Link className="secondary-button" to={`/library/${saved.id}`}>
+          <Link className="secondary-button" to={`${base}/${saved.id}`}>
             Version history
           </Link>
         )}

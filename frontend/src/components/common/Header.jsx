@@ -1,3 +1,4 @@
+import { WorkspaceSwitcher } from '../../contexts/WorkspaceContext';
 import { Link } from 'react-router';
 import { Moon, Sun } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -20,6 +21,7 @@ export default function Header() {
         </span>
       </Link>
       <div className="topbar-tools">
+        <WorkspaceSwitcher />
         {user && (
           <Link className="topbar-account" to="/library">
             My quizzes

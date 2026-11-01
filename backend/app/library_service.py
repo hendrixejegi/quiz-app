@@ -8,7 +8,7 @@ from .schemas import QuizCreate
 
 
 def owned_quiz(db, quiz_id, user, lock=False):
-    query = select(LibraryQuiz).where(LibraryQuiz.id == quiz_id, LibraryQuiz.owner_id == user.id)
+    query = select(LibraryQuiz).where(LibraryQuiz.id == quiz_id, LibraryQuiz.owner_id == user.id, LibraryQuiz.organisation_id.is_(None))
     if lock:
         query = query.with_for_update().execution_options(populate_existing=True)
     quiz = db.scalar(query)

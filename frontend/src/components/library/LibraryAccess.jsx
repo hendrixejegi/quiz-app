@@ -1,8 +1,22 @@
+import {
+  WorkspaceAccess,
+  useLibraryScope,
+} from '../../contexts/WorkspaceContext';
 import { Link, Navigate, useLocation } from 'react-router';
+import { useEffect } from 'react';
+import { libraryReturnPath } from '../../library';
 import { useAuth } from '../../contexts/AuthContext';
-export default function LibraryAccess({ children }) {
+export default function LibraryAccess({ children, organisationAuthor = true }) {
   const { user, loading, error, refreshUser } = useAuth();
   const location = useLocation();
+  const scope = useLibraryScope();
+  useEffect(() => {
+    if (!loading && !user)
+      sessionStorage.setItem(
+        'quizpop:auth-return',
+        libraryReturnPath(location.pathname + location.search),
+      );
+  }, [loading, user?.id, location.pathname, location.search]);
   if (loading) return <p role="status">Loading your account...</p>;
   if (error)
     return (
@@ -21,18 +35,24 @@ export default function LibraryAccess({ children }) {
       />
     );
   return (
-    <div key={user.id} className="library-wrap">
-      {children}
-    </div>
+    <WorkspaceAccess authors={organisationAuthor}>
+      <div
+        key={`${user.id}:${scope.organisationId || 'personal'}`}
+        className="library-wrap"
+      >
+        {children}
+      </div>
+    </WorkspaceAccess>
   );
 }
 export function LibraryHeading({ title, description, children, back = true }) {
+  const { base, organisation } = useLibraryScope();
   return (
     <header className="library-heading">
       <div>
         {back && (
-          <Link to="/library" className="back-link">
-            My quizzes
+          <Link to={base} className="back-link">
+            {organisation ? 'Organisation library' : 'My quizzes'}
           </Link>
         )}
         <h1>{title}</h1>

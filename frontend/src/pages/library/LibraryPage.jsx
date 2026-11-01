@@ -1,3 +1,4 @@
+import { useLibraryScope } from '../../contexts/WorkspaceContext';
 import { Link, useSearchParams } from 'react-router';
 import LibraryAccess, {
   LibraryHeading,
@@ -13,22 +14,25 @@ export default function LibraryPage() {
   );
 }
 function QuizList() {
+  const { base, apiBase, organisation } = useLibraryScope();
   const [params, setParams] = useSearchParams();
   const parsedOffset = Number(params.get('offset'));
   const offset =
     Number.isSafeInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
-  const resource = useLibraryResource(
-    `/api/library/quizzes?offset=${offset}&limit=20`,
-  );
+  const resource = useLibraryResource(`${apiBase}?offset=${offset}&limit=20`);
   const page = resource.data;
   return (
     <>
       <LibraryHeading
         back={false}
-        title="My quizzes"
-        description="Your drafts. Your published versions. Ready whenever your people are."
+        title={organisation ? `${organisation.name} quizzes` : 'My quizzes'}
+        description={
+          organisation
+            ? 'Published quizzes to host, and drafts you can edit.'
+            : 'Your drafts. Your published versions. Ready whenever your people are.'
+        }
       >
-        <Link className="primary-button" to="/library/new">
+        <Link className="primary-button" to={`${base}/new`}>
           New quiz
         </Link>
       </LibraryHeading>
@@ -41,21 +45,23 @@ function QuizList() {
               Save a work in progress, publish it when you're ready, and host it
               more than once.
             </p>
-            <Link className="secondary-button" to="/library/new">
+            <Link className="secondary-button" to={`${base}/new`}>
               Create your first draft
             </Link>
           </section>
         ) : (
           <>
             <p className="library-count">
-              {page.total} {page.total === 1 ? 'quiz' : 'quizzes'}. Only you can
-              access this library.
+              {page.total} {page.total === 1 ? 'quiz' : 'quizzes'}.{' '}
+              {organisation
+                ? 'Organisation workspace.'
+                : 'Only you can access this library.'}
             </p>
             <div className="library-list">
               {page.items.map((quiz) => (
                 <article className="library-row" key={quiz.id}>
                   <div>
-                    <Link className="library-title" to={`/library/${quiz.id}`}>
+                    <Link className="library-title" to={`${base}/${quiz.id}`}>
                       {quizTitle(quiz.title)}
                     </Link>
                     <p>
@@ -68,13 +74,15 @@ function QuizList() {
                         : 'Draft only'}
                     </span>
                   </div>
-                  <Link
-                    className="secondary-button"
-                    to={`/library/${quiz.id}/edit`}
-                  >
-                    Edit draft
-                    <span className="sr-only">: {quizTitle(quiz.title)}</span>
-                  </Link>
+                  {quiz.capabilities?.can_edit_draft !== false && (
+                    <Link
+                      className="secondary-button"
+                      to={`${base}/${quiz.id}/edit`}
+                    >
+                      Edit draft
+                      <span className="sr-only">: {quizTitle(quiz.title)}</span>
+                    </Link>
+                  )}
                 </article>
               ))}
             </div>

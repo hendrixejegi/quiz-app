@@ -1,3 +1,12 @@
+import {
+  OrganisationsPage,
+  OrganisationPage,
+  OrganisationMembersPage,
+  OrganisationInvitationsPage,
+  OrganisationSettingsPage,
+  OrganisationAuditPage,
+} from './pages/organisations';
+import InvitationAcceptPage from './pages/organisations/InvitationAcceptPage';
 import { createBrowserRouter } from 'react-router';
 import AppLayout from './layouts/AppLayout';
 import HomePage from './pages/HomePage';
@@ -29,6 +38,13 @@ export const router = createBrowserRouter(
     LibraryEditorPage,
     LibraryQuizPage,
     LibraryVersionPage,
+    OrganisationsPage,
+    OrganisationPage,
+    OrganisationMembersPage,
+    OrganisationInvitationsPage,
+    OrganisationSettingsPage,
+    OrganisationAuditPage,
+    InvitationAcceptPage,
     LoginPage,
     RegisterPage,
     ForgotPasswordPage,

@@ -1,3 +1,4 @@
+import { Link } from 'react-router';
 import { useState, useRef, useEffect } from 'react';
 import { ArrowRight, Users } from 'lucide-react';
 import { useLocation, useParams, useNavigate } from 'react-router';
@@ -64,6 +65,14 @@ function HostRoom({ eventId, token, user, loading }) {
                     : 'live.'}
               </span>
             </h1>
+            {hostInfo.organisation_id && (
+              <p>
+                Organisation game ·{' '}
+                <Link to={`/organisations/${hostInfo.organisation_id}`}>
+                  Workspace overview
+                </Link>
+              </p>
+            )}
             <div className="host-stats">
               <div className="stat-card">
                 <span className="section-kicker">IN THE ROOM</span>

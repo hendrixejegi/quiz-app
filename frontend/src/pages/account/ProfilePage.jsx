@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
+import { libraryReturnPath } from '../../library';
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useLocation } from 'react-router';
 import { api } from '../../api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAsyncTask } from '../../hooks/useAsyncTask';
@@ -11,7 +13,20 @@ export default function ProfilePage() {
   const { user, loading, setUser, signOut } = useAuth();
   const task = useAsyncTask();
   const navigate = useNavigate();
+  const location = useLocation();
   const [message, setMessage] = useState('');
+  useEffect(() => {
+    const pending =
+      sessionStorage.getItem('quizpop:auth-return') ||
+      (sessionStorage.getItem('quizpop:pending-invitation')
+        ? '/organisations/invitations/accept'
+        : null);
+    if (user && !loading && pending && !location.state?.switchAccount) {
+      sessionStorage.removeItem('quizpop:auth-return');
+      const target = libraryReturnPath(pending);
+      if (target !== '/') navigate(target, { replace: true });
+    }
+  }, [user?.id, loading]);
   function submit(event) {
     event.preventDefault();
     setMessage('');

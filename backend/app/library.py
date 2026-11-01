@@ -40,7 +40,7 @@ def commit(db):
 def list_quizzes(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100),
                  db: Session = Depends(get_db), user=Depends(current_user)):
     """Draft titles, revision status and latest published versions; never another owner's content."""
-    condition = LibraryQuiz.owner_id == user.id
+    condition = (LibraryQuiz.owner_id == user.id) & LibraryQuiz.organisation_id.is_(None)
     total = db.scalar(select(func.count()).select_from(LibraryQuiz).where(condition))
     quizzes = db.scalars(select(LibraryQuiz).where(condition).order_by(LibraryQuiz.updated_at.desc(), LibraryQuiz.id).offset(offset).limit(limit)).all()
     return {'items': [quiz_payload(db, quiz) for quiz in quizzes], 'total': total, 'offset': offset, 'limit': limit}

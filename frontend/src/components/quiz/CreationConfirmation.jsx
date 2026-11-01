@@ -25,8 +25,8 @@ export default function CreationConfirmation({ created }) {
         Open host lobby <ArrowRight size={17} />
       </Link>
       <p className="private-note">
-        Your host room is protected by your account. Sign in as the owner to
-        control this quiz.
+        Your host room is protected by your account. Use an authorised account
+        to control this quiz.
       </p>
     </div>
   );
