@@ -59,3 +59,41 @@ def test_stale_timer_waits_for_lifecycle_lock_and_cannot_resurrect(operation):
         with admin.begin() as conn:
             conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
         admin.dispose()
+
+
+def test_overlapping_workers_and_request_advance_once():
+    raw = os.environ.get('TEST_POSTGRES_URL')
+    if not raw:
+        pytest.skip('Set TEST_POSTGRES_URL to a disposable PostgreSQL test database')
+    url = make_url(raw)
+    assert url.get_backend_name() == 'postgresql' and 'test' in (url.database or '').lower()
+    assert url.set(drivername='postgresql') != configured_engine.url.set(drivername='postgresql')
+    schema = 'timer_test_' + uuid.uuid4().hex
+    admin = create_engine(url)
+    with admin.begin() as conn:
+        conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+    engine = create_engine(url, connect_args={'options': f'-csearch_path={schema}'})
+    try:
+        Base.metadata.create_all(engine)
+        now = datetime.now(timezone.utc)
+        with Session(engine) as db:
+            db.add(Event(id='race', title='Race', join_code='RACE', host_token_hash='unused',
+                state='active', current_question_position=0, timer_deadline=now - timedelta(seconds=1),
+                questions=[Question(position=0, prompt='Q', time_limit_seconds=10, correct_choice_index=0,
+                    choices=[Choice(position=0, text='A'), Choice(position=1, text='B')])]))
+            db.commit()
+        def advance():
+            with Session(engine) as db:
+                return advance_expired_event(db, db.get(Event, 'race'), now)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            outcomes = list(pool.map(lambda _: advance(), range(3)))
+        assert outcomes.count(True) == 1
+        with Session(engine) as db:
+            event = db.get(Event, 'race')
+            assert event.state == 'results'
+            assert event.current_question_position == 0
+    finally:
+        engine.dispose()
+        with admin.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        admin.dispose()

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["iad1"],
+  "services": {
+    "frontend": {
+      "root": "frontend/",
+      "framework": "vite",
+      "buildCommand": "npm run build",
+      "outputDirectory": "dist",
+      "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+    },
+    "backend": { "root": "backend/", "framework": "fastapi", "entrypoint": "app.main:app" }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": { "service": "backend" } },
+    { "source": "/(.*)", "destination": { "service": "frontend" } }
+  ],
+  "daemons": {
+    "timer": {
+      "root": "backend/",
+      "entrypoint": "Dockerfile.timer",
+      "instances": { "iad1": 1 },
+      "terminationGracePeriodSeconds": 30,
+      "livenessProbe": {
+        "httpGet": { "port": 9090, "path": "/health" },
+        "initialDelaySeconds": 10,
+        "periodSeconds": 10,
+        "timeoutSeconds": 1,
+        "failureThreshold": 3
+      }
+    }
+  }
+}
