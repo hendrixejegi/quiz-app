@@ -79,7 +79,7 @@ Correct answers earn 100 points; incorrect and unanswered questions earn zero. T
 
 Treat legacy host links and participant reconnect tokens as bearer secrets. New host URLs require the owning account. Session cookies are opaque, HttpOnly, SameSite=Lax, secure by default, and expire after 24 hours. Server-side logout/revocation takes effect on HTTP requests and before the next WebSocket update. Keep `.env` files out of version control. Schema changes run through Alembic; startup no longer alters tables. Back up existing databases before migration.
 
-Host WebSockets re-read state and authorization once per second. The timer worker runs in-process; coordinate timer ownership before deploying multiple workers.
+Host WebSockets re-read state and authorization once per second. The timer runs in a separate daemon; PostgreSQL row locks serialize deadline transitions across API and daemon processes.
 
 The frontend demo quiz has automated checks for its question banks, category shuffling, and correct-answer association. Add backend coverage for quiz validation, display-name conflicts, host authorization, and the complete timed game flow as those milestones are implemented.
 
@@ -361,3 +361,47 @@ $env:AUTH_SECRET = 'disposable-test-secret'
 $env:AUTH_COOKIE_SECURE = 'false'
 python -m pytest tests/test_email_delivery.py tests/test_auth.py -q
 ```
+
+## Vercel deployment
+
+The repository root `vercel.json` defines React and FastAPI services plus one timer daemon in `iad1`. API paths retain `/api`; the frontend service retains SPA fallback routing. Set the Vercel project root to the repository root, not `frontend/`. All three components deploy together. No schema migration is introduced by this refactor.
+
+### Local clock
+
+After migrating the local database, run `python -m app.timer_daemon` from `backend/` in a third terminal alongside Uvicorn and Vite. FastAPI no longer starts the timer. Both backend processes must use the same database and environment. SQLite remains suitable for local development; hosted deployments require PostgreSQL. Request handlers still advance expired state defensively.
+
+The daemon polls expired events every 200 ms. PostgreSQL row locks and refreshed deadlines serialize advancement across API requests and overlapping daemon instances. Restarting catches up from saved deadlines rather than extending questions. Its private port 9090 `/health` endpoint detects a loop stalled for 60 seconds; database retry backoff counts as loop progress. A healthy process can still have an unavailable database: monitor recovery/error logs and overdue events as well. SIGTERM stops new cycles and drains the current transaction.
+
+### Environment and database setup
+
+Create `quizpop-staging` and `quizpop` Vercel projects, each with its own Neon project in AWS US East (Northern Virginia). Deploy staging through that project's **production environment**: Vercel Daemons currently do not run in preview deployments. Do not share production secrets or database credentials with staging or previews. Use disposable databases for previews; complete timed-game acceptance belongs in staging.
+
+For each project's production environment configure:
+
+- `DATABASE_URL`: Neon pooled PostgreSQL URL with TLS (`sslmode=require`). Used by FastAPI and the daemon.
+- `AUTH_SECRET`: independently generated persistent secret; `AUTH_COOKIE_SECURE=true`.
+- `FRONTEND_URL` and `FRONTEND_ORIGINS`: the exact stable HTTPS app origin, without a trailing slash. Keep `VITE_API_URL` empty.
+- SMTP settings from `backend/.env.example`; verify email delivery using a staging account.
+- Google credentials and both callback URLs under the app origin: `/api/auth/google/callback` and `/api/auth/link/google/callback`. Register exact URLs with Google.
+
+Keep `MIGRATION_DATABASE_URL` on the trusted release machine only, set to the corresponding Neon **direct** TLS URL. Alembic uses it when present and otherwise uses `DATABASE_URL`. Application pools have two connections per engine, no overflow, a five-second checkout/connect timeout, and transaction-local 10-second statement / 3-second lock / 10-second idle transaction limits. Authentication has its own bounded async pool. Prepared statement auto-preparation is disabled for pooled connections. Exercise both authentication and quiz traffic against Neon staging before launch.
+
+Continuous daemon polling keeps Neon active even with no games; budget for database compute and daemon memory uptime. Keep one daemon instance initially. The configured region applies to API compute; the static frontend is delivered through Vercel's CDN.
+
+### Release and acceptance
+
+1. Back up the target database and confirm the intended environment without printing credentials. From `backend/`, set the direct migration URL and run `python -m alembic current`, `python -m alembic heads`, `python -m alembic upgrade head`, then `python -m alembic current`. Never migrate during a build or API/daemon startup.
+2. Deploy the branch to the staging project's production environment. Confirm `/api/health`, daemon health, and logs. Check deep links such as `/account/login` directly and verify static assets load.
+3. Register, verify email, log in/out, exercise CSRF and configured Google flows. Create a quiz, join with participants, submit answers, reconnect the host WebSocket, and verify standings and answer-review timing.
+4. Start a quiz, close browser tabs, and reopen after its deadlines to verify completion without requests. Restart the daemon during a game; verify catch-up, no duplicate advancement, and unchanged scoring. Check daemon shutdown and recovery logs.
+5. Only after staging passes, back up/migrate production once and deploy. Repeat the live-game smoke test before inviting users. Watch daemon failures, overdue `active`/`results` deadlines, API errors, and Neon connection usage. Investigate overdue games even if process health is green.
+6. Roll back only to code compatible with the current schema. Vercel rolls daemon versions along with the production deployment; row locks make their overlap safe. A rollback to older code that starts embedded timers needs separate verification. Do not downgrade a shared database to undo this refactor.
+
+### Validation commands
+
+From `frontend/`: `npm test` and `npm run build`.
+From `backend/`, set `AUTH_SECRET`, `AUTH_COOKIE_SECURE=false`, and `DATABASE_URL` to a new disposable SQLite file whose name contains `auth-test`, then run `python -m pytest tests -q`. Tests clear account data; never use a shared database. Set `TEST_POSTGRES_URL` to a separate disposable PostgreSQL database with `test` in its name to enable row-lock concurrency checks. Clear `MIGRATION_DATABASE_URL` during tests.
+
+Build the timer image from the repository root with `docker build -f backend/Dockerfile.timer -t quizpop-timer backend`. Run it with an untracked environment file containing the staging database settings: `docker run --rm --env-file backend/.env quizpop-timer` (use an explicitly prepared staging file rather than production credentials). No public health-port mapping is required. Vercel's `vercel dev` does not run daemons; start the Python module separately.
+
+Platform references: [Services](https://vercel.com/docs/services), [Daemons](https://vercel.com/docs/daemons), [Neon pooling](https://neon.com/docs/connect/connection-pooling).

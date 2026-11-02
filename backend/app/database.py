@@ -5,15 +5,44 @@ from pathlib import Path
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./quiz.db")
+if os.getenv('VERCEL') and not DATABASE_URL.startswith(('postgres://', 'postgresql://', 'postgresql+psycopg://')):
+    raise RuntimeError('Vercel deployments require a PostgreSQL DATABASE_URL')
 if DATABASE_URL.startswith(("postgres://", "postgresql://")):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1).replace("postgresql://", "postgresql+psycopg://", 1)
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
+def database_engine_options(url):
+    if url.startswith('sqlite'):
+        return {'connect_args': {'check_same_thread': False}, 'pool_pre_ping': True}
+    return {
+        'pool_pre_ping': True, 'pool_size': 2, 'max_overflow': 0,
+        'pool_timeout': 5, 'pool_recycle': 300,
+        'connect_args': {
+            'connect_timeout': 5,
+            'prepare_threshold': None,
+        },
+    }
+
+
+engine = create_engine(DATABASE_URL, **database_engine_options(DATABASE_URL))
+
+
+def install_transaction_limits(target):
+    if target.dialect.name != 'postgresql':
+        return
+
+    @event.listens_for(target, 'begin')
+    def transaction_limits(connection):
+        # Transaction-local settings are safe behind PgBouncer.
+        connection.exec_driver_sql('SET LOCAL statement_timeout = 10000')
+        connection.exec_driver_sql('SET LOCAL lock_timeout = 3000')
+        connection.exec_driver_sql('SET LOCAL idle_in_transaction_session_timeout = 10000')
+
+
+install_transaction_limits(engine)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 

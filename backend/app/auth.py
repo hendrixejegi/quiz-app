@@ -20,7 +20,7 @@ from sqlalchemy import String, delete
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .database import Base, DATABASE_URL
+from .database import Base, DATABASE_URL, database_engine_options, install_transaction_limits
 
 SECURE = os.getenv('AUTH_COOKIE_SECURE', 'true').lower() != 'false'
 SECRET = os.getenv('AUTH_SECRET')
@@ -40,7 +40,11 @@ class AccessToken(SQLAlchemyBaseAccessTokenTableUUID, Base):
     pass
 
 async_url = DATABASE_URL.replace('sqlite://', 'sqlite+aiosqlite://').replace('postgresql://', 'postgresql+psycopg://')
-auth_engine = create_async_engine(async_url, pool_pre_ping=True)
+auth_options = database_engine_options(async_url)
+if async_url.startswith('sqlite'):
+    auth_options = {'pool_pre_ping': True}
+auth_engine = create_async_engine(async_url, **auth_options)
+install_transaction_limits(auth_engine.sync_engine)
 AuthSession = async_sessionmaker(auth_engine, expire_on_commit=False)
 
 async def get_auth_db():
